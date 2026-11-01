@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "vcam_scope": vcam.SCOPE_USER,
     "current_preset": "",
     "creator": "",
+    "twitch_channel": "",             # lien de la chaîne Twitch : bouton « Chat Twitch » sur l'OBS du live
     "creator_in_name": True,          # décoché : les fichiers n'ont pas ton nom (enregistrements solo)
     "video_name": "",
     "filename_template": naming.DEFAULT_TEMPLATE,

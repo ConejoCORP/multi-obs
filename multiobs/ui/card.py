@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox,
                                QPushButton, QToolButton, QVBoxLayout, QWidget)
 
-from .. import naming, theme
+from .. import naming, theme, twitch
 from ..controller import InstanceController
 from ..instance_config import record_directory
 from ..theme import YAMI
@@ -55,6 +55,7 @@ class InstanceCard(QFrame):
         self.ctrl = ctrl
         self.filename_preview = None   # fourni par la fenêtre principale
         self.before_record = None      # idem : demande le nom de la vidéo puis lance le rec (option)
+        self.open_chat = None          # idem : ouvre le chat Twitch (OBS du live)
         self.vcam_name = vcam_name     # « VCam Rouge » : nom de la caméra virtuelle dans Windows
         self.setObjectName("instanceCard")
         self.setMinimumWidth(420)
@@ -150,6 +151,14 @@ class InstanceCard(QFrame):
         self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.folder_btn.setToolTip("Ouvrir le dossier des enregistrements de cette instance")
         self.folder_btn.clicked.connect(self._open_record_folder)
+        # OBS du live : chat Twitch dans une fenêtre à part, en un clic (chaîne dans les paramètres).
+        self.chat_btn = QToolButton(objectName="flatIcon")
+        self.chat_btn.setIcon(icon("twitch.svg"))
+        self.chat_btn.setIconSize(QSize(18, 18))
+        self.chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chat_btn.setToolTip("Ouvrir le chat Twitch de ta chaîne dans une fenêtre à part\n"
+                                 "(lien de la chaîne : Paramètres → Général)")
+        self.chat_btn.clicked.connect(lambda: self.open_chat and self.open_chat())
         # Link : l'instance suit les boutons du haut (Tout enregistrer / Tout en pause) et les raccourcis.
         self.include = QToolButton(objectName="linkToggle")
         self.include.setText("Link")
@@ -166,6 +175,7 @@ class InstanceCard(QFrame):
         row.addWidget(self.rec_btn)
         row.addWidget(self.pause_btn)
         row.addWidget(self.folder_btn)
+        row.addWidget(self.chat_btn)
         row.addStretch(1)
         row.addWidget(self.include)
         body.addLayout(row)
@@ -327,6 +337,7 @@ class InstanceCard(QFrame):
         fps_setting = int(c.settings.get("preview_fps", 60)) if c.settings else 60
 
         self._set_chip(*_status_chip(c))
+        self.chat_btn.setVisible(twitch.is_live_instance(c.inst))   # suit le nom et le type de l'instance
         if status == "stopped":
             self.preview.placeholder = "Instance éteinte — double-clic pour l'allumer"
         elif status == "starting":

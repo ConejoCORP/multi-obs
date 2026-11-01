@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFra
                                QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
                                QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, APP_VERSION, applog, obsfiles, paths, vcam, winapi
+from .. import APP_NAME, APP_VERSION, applog, obsfiles, paths, twitch, vcam, winapi
 from ..controller import RESUME_GUARD_S
 from ..framesync import OP_NAMES, FrameSync
 from ..hotkeys import GlobalHotkeys
@@ -325,6 +325,7 @@ class MainWindow(QMainWindow):
                 card.filename_preview = (lambda i=inst.id: self.manager.filename_preview(
                     next(x for x in self.manager.instances if x.id == i)))
                 card.before_record = self.ask_video_name_then
+                card.open_chat = self.open_twitch_chat
                 self.cards[inst.id] = card
             else:
                 self.cards[inst.id].vcam_name = names.get(inst.vcam, "")
@@ -583,6 +584,24 @@ class MainWindow(QMainWindow):
         if len(aligned) >= 2 and self.manager.settings.get("sync_start", True):
             self._sync_busy, self._sync_started, self._sync_op = True, time.monotonic(), "align"
             self.framesync.align([self._sync_target(c) for c in aligned])
+
+    def open_twitch_chat(self) -> None:
+        """Bouton « Chat Twitch » de l'OBS du live : la première fois, demande le lien de la chaîne (gardé)."""
+        link = self.manager.settings.get("twitch_channel", "")
+        if not twitch.channel(link):
+            text, ok = QInputDialog.getText(self, "Chat Twitch", "Lien de ta chaîne Twitch (ou son nom) :",
+                                            QLineEdit.EchoMode.Normal, link)
+            if not ok:
+                return
+            if not twitch.channel(text):
+                QMessageBox.warning(self, APP_NAME, "Ce n'est pas un lien de chaîne Twitch.\n"
+                                    "Exemple : https://www.twitch.tv/tachaine")
+                return
+            link = text.strip()
+            self.manager.settings["twitch_channel"] = link
+            self.manager.save()
+        if not twitch.open_chat(link):
+            QMessageBox.warning(self, APP_NAME, "Impossible d'ouvrir le chat Twitch.")
 
     def ask_video_name_then(self, start) -> bool:
         """Option « Demander le nom de la vidéo à chaque lancement de rec » : quand rien n'enregistre encore

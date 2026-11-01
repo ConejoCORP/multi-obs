@@ -3,6 +3,13 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.4
+
+- **Chat Twitch en un clic** : le logo Twitch sur la carte de l'OBS du live (type Live, ou « live » dans son
+  nom) ouvre le chat de ta chaîne, en thème sombre, dans une fenêtre à part (fenêtre de Chrome ou d'Edge sans
+  onglets, avec ton compte Twitch déjà connecté). Le lien de la chaîne se met dans ⚙ → Général → Twitch, ou
+  il est demandé au premier clic.
+
 ## 1.1.3
 
 - **Nom de la vidéo demandé au lancement du rec** (option, désactivée par défaut : ⚙ → Enregistrements) :

@@ -322,6 +322,15 @@ class SettingsDialog(QDialog):
         form.addRow(self.taskbar_rename)
         general.addWidget(g)
 
+        g = QGroupBox("Twitch")
+        form = QFormLayout(g)
+        self.twitch = QLineEdit(manager.settings.get("twitch_channel", ""))
+        self.twitch.setPlaceholderText("https://www.twitch.tv/tachaine")
+        self.twitch.setToolTip("Le bouton « Chat Twitch » de l'OBS du live (type Live, ou « live » dans son nom) "
+                               "ouvre le chat de cette chaîne dans une fenêtre à part.")
+        form.addRow("Lien de ta chaîne", self.twitch)
+        general.addWidget(g)
+
         from .. import APP_VERSION
         g = QGroupBox("Mises à jour")
         row = QHBoxLayout(g)
@@ -817,6 +826,7 @@ class SettingsDialog(QDialog):
         s["check_updates"] = self.check_updates.isChecked()
         s["trash_mkv_after_remux"] = self.trash_mkv.isChecked()
         s["live_color"] = self.live_color.value
+        s["twitch_channel"] = self.twitch.text().strip()
         s["ask_video_name"] = self.ask_video_name.isChecked()
         s["sync_start"] = self.sync_start.isChecked()
         s["sync_stop"] = self.sync_stop.isChecked()
