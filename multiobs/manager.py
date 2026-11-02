@@ -301,7 +301,12 @@ class Manager(QObject):
             obsfiles.set_vcam_placeholder(inst.vcam, inst.color)
         if stale and self.settings.get("vcam_scope") == vcam.SCOPE_USER:
             progress(0, 0, "Installation des caméras virtuelles…")
-            failed = vcam.install(stale, vcam.SCOPE_USER, colors, names)
+            try:
+                failed = vcam.install(stale, vcam.SCOPE_USER, colors, names)
+            except (OSError, RuntimeError) as e:
+                # Caméras virtuelles impossibles (OBS inconnu…) : les instances s'allument quand même.
+                applog.log(f"Allumage : caméras virtuelles {[names.get(n, n) for n in stale]} non installées ({e})")
+                return stale
             applog.log(f"Allumage : caméras virtuelles {[names.get(n, n) for n in stale]} installées"
                        + (f" (échec pour {failed})" if failed else ""))
             return failed
@@ -322,7 +327,10 @@ class Manager(QObject):
             ensure_config(inst, None, self.filename_format(inst), bool(self.settings.get("auto_remux", True)))
         for inst in self.instances:
             if vcam.registered_scope(inst.vcam):
-                obsfiles.build_vcam_modules(inst.vcam, inst.color)
+                try:
+                    obsfiles.build_vcam_modules(inst.vcam, inst.color)
+                except (OSError, RuntimeError) as e:
+                    applog.log(f"Mise à jour d'OBS : caméra virtuelle {inst.vcam} non mise à jour ({e})")
 
     # ------------------------------------------------------------------ #
     # Préconfigs

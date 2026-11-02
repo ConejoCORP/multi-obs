@@ -49,7 +49,7 @@ VENDOR = "multiobs-sync"   # module OBS de Multi OBS (requête « status »)
 VENDOR_STATUS = {"requestType": "CallVendorRequest", "requestData": {"vendorName": VENDOR, "requestType": "status"}}
 # Versions d'OBS avec lesquelles le module a été vérifié (il lit des structures d'OBS : une autre version
 # majeure pourrait les changer, ses mesures ne seraient alors plus sûres).
-SYNC_OBS_VERSIONS = ("31.", "32.")
+SYNC_OBS_VERSIONS = ("31.", "32.", "33.")
 
 
 def sync_usable(status: dict | None) -> bool:

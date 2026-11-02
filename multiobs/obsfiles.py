@@ -24,12 +24,18 @@ _GUID_NAMESPACE = uuid.UUID("6b1f3e2a-8a77-4c55-9d7e-0b5d6c3f9a10")
 WINDSHOW_REL = Path("obs-plugins") / "64bit" / "win-dshow.dll"
 SYNC_PLUGIN_REL = Path("obs-plugins") / "64bit" / "multiobs-sync.dll"
 MODULE_DIR_REL = Path("data") / "obs-plugins" / "win-dshow"
+# OBS 33 et plus : les modules officiels sont dans core/<module>/ (données dans core/<module>/data),
+# et ceux d'une installation portable dans plugins/<module>/<module>.dll.
+CORE_WINDSHOW_REL = Path("core") / "win-dshow" / "win-dshow.dll"
+CORE_MODULE_DIR_REL = Path("core") / "win-dshow" / "data"
+CORE_SYNC_PLUGIN_REL = Path("plugins") / "multiobs-sync" / "multiobs-sync.dll"
 PORTABLE_MARKER = "obs_portable_mode.txt"
 TREE_MARKER = ".multiobs_tree.json"
 RUNTIME_MARKER = ".multiobs_runtime.json"
 SKIP_TOP = {"config", PORTABLE_MARKER, "portable_mode.txt", TREE_MARKER, RUNTIME_MARKER}
 
 MAX_VCAM = 9
+TREE_VERSION = 2
 
 
 class PatchError(RuntimeError):
@@ -46,6 +52,21 @@ def vcam_guid(n: int) -> uuid.UUID:
 
 def vcam_name(n: int) -> str:
     return f"OBS Virtual Camera {n}"
+
+
+def core_layout(root: Path) -> bool:
+    """OBS 33 ou plus : modules officiels rangés dans core/."""
+    return (root / CORE_WINDSHOW_REL).exists()
+
+
+def windshow_rel(root: Path) -> Path:
+    return CORE_WINDSHOW_REL if core_layout(root) else WINDSHOW_REL
+
+
+def module_dir(root: Path | None = None) -> Path:
+    """Dossier des modules DirectShow de la caméra virtuelle d'OBS (et de son image d'attente)."""
+    root = root or paths.RUNTIME
+    return root / (CORE_MODULE_DIR_REL if core_layout(root) else MODULE_DIR_REL)
 
 
 def _w(s: str) -> bytes:
@@ -196,8 +217,10 @@ def tree_info(inst_dir: Path) -> dict | None:
 def tree_is_current(inst_dir: Path, vcam: int) -> bool:
     info = tree_info(inst_dir)
     rt = runtime_signature()
+    # Avant la version 2, le win-dshow d'OBS 33 (rangé dans core/) n'était pas patché.
     return bool(info and rt and info.get("runtime") == rt and info.get("vcam") == vcam
-                and (inst_dir / paths.OBS_EXE_REL).exists())
+                and (inst_dir / paths.OBS_EXE_REL).exists()
+                and (info.get("tree", 1) >= TREE_VERSION or not core_layout(inst_dir)))
 
 
 def clear_tree(inst_dir: Path) -> None:
@@ -220,6 +243,7 @@ def build_tree(inst_dir: Path, vcam: int, progress: Progress) -> None:
     clear_tree(inst_dir)
     inst_dir.mkdir(parents=True, exist_ok=True)
     files = _list_files(paths.RUNTIME)
+    windshow = windshow_rel(paths.RUNTIME)
     total = len(files)
     for i, rel in enumerate(files):
         if i % 100 == 0:
@@ -227,7 +251,7 @@ def build_tree(inst_dir: Path, vcam: int, progress: Progress) -> None:
         src = paths.RUNTIME / rel
         dst = inst_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if rel == WINDSHOW_REL:
+        if rel == windshow:
             dst.write_bytes(patch_windshow(src.read_bytes(), vcam))
             continue
         try:
@@ -235,17 +259,20 @@ def build_tree(inst_dir: Path, vcam: int, progress: Progress) -> None:
         except OSError:
             shutil.copy2(src, dst)
     (inst_dir / PORTABLE_MARKER).write_text("", "utf-8")
-    (inst_dir / TREE_MARKER).write_text(json.dumps({"runtime": rt, "vcam": vcam}, indent=2), "utf-8")
+    (inst_dir / TREE_MARKER).write_text(json.dumps({"runtime": rt, "vcam": vcam, "tree": TREE_VERSION}, indent=2),
+                                        "utf-8")
     install_sync_plugin(inst_dir)
     progress(total, total, "Instance prête")
 
 
 def install_sync_plugin(inst_dir: Path) -> None:
     """Ajoute à l'instance le module OBS qui permet d'aligner les recs à l'image près (framesync.py)."""
-    src, dst = paths.SYNC_PLUGIN, inst_dir / SYNC_PLUGIN_REL
-    if not src.exists() or not dst.parent.is_dir():
+    core = core_layout(inst_dir)   # faux aussi tant que l'instance n'est pas construite
+    src, dst = paths.SYNC_PLUGIN, inst_dir / (CORE_SYNC_PLUGIN_REL if core else SYNC_PLUGIN_REL)
+    if not src.exists() or not (core or dst.parent.is_dir()):
         return
     try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
         data = src.read_bytes()
         if not dst.exists() or dst.read_bytes() != data:
             dst.write_bytes(data)
@@ -255,7 +282,10 @@ def install_sync_plugin(inst_dir: Path) -> None:
 
 def build_vcam_modules(n: int, color: str | None = None) -> Path:
     """Écrit les modules DirectShow patchés de la caméra n dans data/vcam/n."""
-    src = paths.RUNTIME / MODULE_DIR_REL
+    src = module_dir()
+    if not (src / "obs-virtualcam-module64.dll").exists():
+        raise RuntimeError("La caméra virtuelle d'OBS est absente de la copie d'OBS "
+                           f"({src / 'obs-virtualcam-module64.dll'}).")
     out = paths.VCAM / str(n)
     out.mkdir(parents=True, exist_ok=True)
     for name in ("obs-virtualcam-module64.dll", "obs-virtualcam-module32.dll"):
@@ -278,7 +308,7 @@ def set_vcam_placeholder(n: int, color: str | None) -> None:
     if not out.exists():
         return
     colored = paths.ASSETS / "placeholders" / f"{color}.png" if color else None
-    src = colored if colored and colored.exists() else paths.RUNTIME / MODULE_DIR_REL / "placeholder.png"
+    src = colored if colored and colored.exists() else module_dir() / "placeholder.png"
     target = out / "placeholder.png"
     try:
         if src.exists() and (not target.exists() or target.read_bytes() != src.read_bytes()):

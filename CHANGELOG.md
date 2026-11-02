@@ -3,6 +3,16 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.5
+
+- **Compatible OBS 33** : OBS 33 range ses modules dans un nouveau dossier `core`, et la préparation des
+  instances s'arrêtait sur l'erreur « No such file or directory … obs-virtualcam-module64.dll ». Multi OBS
+  reconnaît maintenant les deux organisations : caméras virtuelles, synchro à l'image près et préparation
+  marchent avec OBS 33 comme avec les versions d'avant. Les instances déjà préparées sous OBS 33 sont
+  reconstruites automatiquement (scènes et réglages conservés).
+- Si les caméras virtuelles ne peuvent pas être installées, les OBS s'allument quand même (un message le
+  signale en bas de la fenêtre) au lieu de s'arrêter sur une erreur.
+
 ## 1.1.4
 
 - **Chat Twitch en un clic** : le logo Twitch sur la carte de l'OBS du live (type Live, ou « live » dans son
