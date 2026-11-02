@@ -2,9 +2,9 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.stundzow.multiobs",
   "Name": "Multi OBS",
-  "Version": "1.1.1.0",
+  "Version": "1.1.6.0",
   "Author": "StundZow",
-  "Description": "Pilote les OBS de Multi OBS avec des touches colorées : enregistrer (timecode sur la touche), pause à l'image près, allumer / éteindre, caméra virtuelle, et une touche « Action OBS » pour les scènes, sources, filtres, son, live et capture, en appui court et en appui long. Pour un OBS, ou pour toutes les instances d'un coup.",
+  "Description": "Pilote les OBS de Multi OBS avec des touches colorées : enregistrer (timecode sur la touche), pause à l'image près, allumer / éteindre, caméra virtuelle, et une touche « Action OBS » pour les scènes, sources, filtres, son, live et capture, en appui court et en appui long, avec ton image, ton texte ou un picto. Pour un OBS, ou pour toutes les instances d'un coup.",
   "URL": "https://github.com/StundZow/multi-obs",
   "Icon": "imgs/plugin",
   "Category": "Multi OBS",
@@ -76,7 +76,7 @@
     {
       "UUID": "com.stundzow.multiobs.custom",
       "Name": "Action OBS",
-      "Tooltip": "Scène, source, filtre, son, live, capture, rec… en appui court et en appui long",
+      "Tooltip": "Scène, source, filtre, son, live, capture, rec… en appui court et en appui long, avec ton image, ton texte ou un picto",
       "Icon": "imgs/actions/custom",
       "States": [
         {

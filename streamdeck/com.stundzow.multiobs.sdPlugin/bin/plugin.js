@@ -515,9 +515,9 @@ function opView(o, e, all) {
   const on = (v) => (v === true ? "on" : v === false ? "dim" : "idle");
   switch (o.op) {
     case "record":
-      return { glyph: rec === "idle" ? "rec" : "stop", tone: recTone, label: rec === "idle" ? "REC" : keys.formatTime(liveMs(e)) };
+      return { glyph: rec === "idle" ? "rec" : "stop", tone: recTone, label: rec === "idle" ? "REC" : keys.formatTime(liveMs(e)), live: rec !== "idle" };
     case "pause":
-      return { glyph: rec === "paused" ? "play" : "pause", tone: recTone, label: rec === "idle" ? "PAUSE" : keys.formatTime(liveMs(e)) };
+      return { glyph: rec === "paused" ? "play" : "pause", tone: recTone, label: rec === "idle" ? "PAUSE" : keys.formatTime(liveMs(e)), live: rec !== "idle" };
     case "power": {
       const running = !!e && e.status !== "stopped";
       return { glyph: "power", tone: running ? "on" : "idle", label: running ? "ALLUMÉ" : "ÉTEINT" };
@@ -539,12 +539,29 @@ function opView(o, e, all) {
       return { glyph: muted ? "speakeroff" : "speaker", tone: muted ? "rec" : "idle", label: o.input || "SON ?" };
     }
     case "stream":
-      return { glyph: "live", tone: e && e.streaming ? "rec" : "idle", label: e && e.streaming ? keys.formatTime(streamMs(e)) : "LIVE" };
+      return { glyph: "live", tone: e && e.streaming ? "rec" : "idle", label: e && e.streaming ? keys.formatTime(streamMs(e)) : "LIVE", live: !!(e && e.streaming) };
     case "screenshot":
       return { glyph: "photo", tone: "idle", label: "CAPTURE" };
     default:
       return { glyph: "none", tone: "idle", label: "" };
   }
+}
+
+// Apparence choisie dans la fenêtre de réglages : { icon: picto | "image" | "none", text, notext, image, iw, ih, fit }.
+// Le texte perso remplace le texte de l'action, sauf un timecode en cours (rec, pause, live).
+const IMAGE_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/;
+function applyLook(v, look) {
+  if (!look || typeof look !== "object") return v;
+  const out = { ...v };
+  if (look.icon === "none") out.glyph = "";
+  else if (look.icon === "image") {
+    if (typeof look.image === "string" && IMAGE_RE.test(look.image)) {
+      out.image = { src: look.image, w: Number(look.iw) || 0, h: Number(look.ih) || 0, fit: look.fit === "contain" ? "contain" : "cover" };
+    }
+  } else if (keys.PICKS.includes(look.icon)) out.glyph = look.icon;
+  if (look.notext) out.label = "";
+  else if (typeof look.text === "string" && look.text.trim() && !v.live) out.label = look.text.trim().slice(0, 40);
+  return out;
 }
 
 function model(a) {
@@ -605,7 +622,8 @@ function model(a) {
   if (a.kind === "custom") {
     const ops = [normalizeOp(s.short), normalizeOp(s.long)];
     if (ops[1].op === "none") ops.pop();
-    m.views = ops.length === 1 && ops[0].op === "none" ? [] : ops.map((o) => opView(o, e, all));
+    const look = s.look || {};
+    m.views = ops.length === 1 && ops[0].op === "none" ? [] : ops.map((o, i) => applyLook(opView(o, e, all), look[i ? "long" : "short"]));
     if (m.views.some((v, i) => SINGLE_ONLY.includes(ops[i].op)) && all) m.phase = "unset";
   }
   return m;

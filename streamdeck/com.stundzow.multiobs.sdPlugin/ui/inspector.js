@@ -37,7 +37,7 @@ const ABOUT = {
   record: "Démarre / arrête l'enregistrement, avec le timecode sur la touche. Au choix : appui court = pause et appui long = rec / stop, pour ne jamais couper un rec par erreur.",
   pause: "Met l'enregistrement en pause, puis le reprend. Avec « Tous », toutes les instances liées s'arrêtent sur la même image.",
   power: "Allume ou éteint l'OBS. Éteindre est refusé pendant un enregistrement, pour ne rien perdre.",
-  custom: "La touche à tout faire : scène, source, filtre, son, live, capture, rec… Choisis son action. Tu peux en ajouter une 2e en appui long : la touche se partage en deux, et un cercle blanc grandit pendant le maintien.",
+  custom: "La touche à tout faire : scène, source, filtre, son, live, capture, rec… Choisis son action, puis son apparence : ton image, ton texte ou un picto. Tu peux ajouter une 2e action en appui long : la touche se partage en deux, et un cercle blanc grandit pendant le maintien.",
   vcam: "Allume ou éteint la caméra virtuelle de l'OBS (« VCam Rouge »…), pour Discord, Zoom ou une autre instance.",
   show: "Affiche la fenêtre de l'OBS pour régler ses scènes. Avec « Tous » : la fenêtre de Multi OBS.",
 };
@@ -92,10 +92,10 @@ function toPlugin(payload) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ event: "sendToPlugin", action: actionUUID, context: piUUID, payload }));
 }
 
-function save(patch) {
+function save(patch, quiet) {
   Object.assign(settings, patch);
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ event: "setSettings", context: piUUID, payload: settings }));
-  render();
+  if (!quiet) render();
 }
 
 function current() {
@@ -274,6 +274,7 @@ function renderPresses(s) {
       box.appendChild(b);
     }
     renderParams(press, chosen, single ? s.target : "");
+    renderLook(press, s, chosen);
   }
   const long = getOp(s, "long");
   document.getElementById("delay").hidden = long.op === "none";
@@ -373,4 +374,238 @@ function renderParams(press, o, target) {
     const text = error === "Éteint" || error === "Démarrage" ? `Allume « ${name} » pour voir ses scènes et ses sources.` : `Liste indisponible : ${error}.`;
     box.appendChild(el("p", "note", esc(text)));
   }
+}
+
+// ---------------------------------------------------------------- apparence : image, texte, picto
+// Réglage look.short / look.long : { icon: picto | "image" | "none" (absent = auto), text, notext, image, iw, ih, fit }.
+// L'image est réduite ici (petit côté ≤ 144 px) et gardée dans les réglages de la touche : elle suit les
+// profils exportés. Opaque → JPEG, qui remplit la touche ; transparente → PNG, posée entière sur la couleur d'état.
+const ICON_NAMES = {
+  scene: "Scène", monitor: "Écran", camera: "Caméra", webcam: "Webcam", person: "Personne", duo: "Duo", gamepad: "Manette",
+  chat: "Discussion", mic: "Micro", micoff: "Micro coupé", headset: "Casque", speaker: "Son", speakeroff: "Son coupé",
+  music: "Musique", picture: "Image", photo: "Photo", film: "Vidéo", pencil: "Dessin", code: "Code", coffee: "Pause café",
+  clock: "Horloge", moon: "Nuit", home: "Accueil", phone: "Téléphone", star: "Étoile", heart: "Cœur", fire: "Feu",
+  bolt: "Éclair", sparkle: "Étincelle", bulb: "Idée", bell: "Cloche", trophy: "Trophée", flag: "Drapeau", check: "Validé",
+  arrow: "Suivant", live: "Live", rec: "Rec", pause: "Pause", play: "Lecture", stop: "Stop", power: "Marche",
+  eye: "Visible", eyeoff: "Caché", filter: "Filtre",
+};
+const lookUI = {};
+const lookOpen = {};    // panneau ouvert / fermé par l'utilisateur (sinon : ouvert si l'apparence est perso)
+const textTimers = {};
+
+function getLook(s, press) {
+  const l = (s.look || {})[press];
+  return l && typeof l === "object" ? l : {};
+}
+
+function setLook(press, patch, quiet) {
+  const look = Object.assign({}, settings.look || {});
+  const next = patch ? Object.assign({}, look[press] || {}, patch) : {};
+  for (const k of Object.keys(next)) if (next[k] === "" || next[k] == null || next[k] === false) delete next[k];
+  if (Object.keys(next).length) look[press] = next;
+  else delete look[press];
+  save({ look }, quiet);
+}
+
+function defaultLabel(o) {
+  return {
+    record: "REC", pause: "PAUSE", power: "ALLUMÉ / ÉTEINT", vcam: "VCAM ON / OFF", show: "VOIR OBS", stream: "LIVE", screenshot: "CAPTURE",
+    scene: o.scene, item: o.source, filter: o.filter, mute: o.input,
+  }[o.op] || "";
+}
+
+function glyphSvg(name, color) {
+  const K = window.MultiObsKeys;
+  return `<svg viewBox="0 0 48 48">${K ? K.glyph(name, 24, 24, 42, color, "#e5243b") : ""}</svg>`;
+}
+
+function buildLook(press) {
+  const root = document.querySelector(`.look[data-press="${press}"]`);
+  root.innerHTML = `
+    <button type="button" class="look-head"><span class="look-title">Apparence</span><span class="look-sum"></span><span class="look-chev"></span></button>
+    <div class="look-body">
+      <div class="look-label">Image ou picto</div>
+      <div class="seg">
+        <button type="button" data-icon="">Auto</button>
+        <button type="button" data-icon="image">Image</button>
+        <button type="button" data-icon="none">Aucun</button>
+      </div>
+      <div class="imgzone">
+        <div class="thumb"></div>
+        <div class="imgside">
+          <div class="imgbtns"><button type="button" class="pick">Choisir une image…</button><button type="button" class="remove">Retirer</button></div>
+          <div class="seg small fitseg">
+            <button type="button" data-fit="cover">Remplir la touche</button>
+            <button type="button" data-fit="contain">Image entière</button>
+          </div>
+          <div class="imgnote">ou glisse une image ici</div>
+        </div>
+        <input type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/bmp,image/svg+xml" hidden>
+      </div>
+      <div class="icons"></div>
+      <div class="look-label">Texte</div>
+      <div class="textrow">
+        <input type="text" class="ltext" maxlength="40" spellcheck="false">
+        <label class="notext"><input type="checkbox"> Aucun</label>
+      </div>
+      <p class="look-hint"></p>
+      <button type="button" class="look-reset">Remettre l'apparence par défaut</button>
+    </div>`;
+  const ui = {
+    root,
+    sum: root.querySelector(".look-sum"),
+    chev: root.querySelector(".look-chev"),
+    body: root.querySelector(".look-body"),
+    seg: [...root.querySelectorAll(".seg:not(.fitseg) button")],
+    fit: [...root.querySelectorAll(".fitseg button")],
+    zone: root.querySelector(".imgzone"),
+    thumb: root.querySelector(".thumb"),
+    note: root.querySelector(".imgnote"),
+    remove: root.querySelector(".remove"),
+    file: root.querySelector("input[type=file]"),
+    icons: root.querySelector(".icons"),
+    text: root.querySelector(".ltext"),
+    notext: root.querySelector(".notext input"),
+    hint: root.querySelector(".look-hint"),
+    iconBtns: {},
+  };
+  root.querySelector(".look-head").onclick = () => {
+    lookOpen[press] = ui.body.hidden;
+    render();
+  };
+  for (const b of ui.seg) {
+    b.onclick = () => {
+      const icon = b.dataset.icon;
+      if (icon === "image" && !getLook(current(), press).image) ui.file.click();
+      else setLook(press, { icon });
+    };
+  }
+  for (const b of ui.fit) b.onclick = () => setLook(press, { fit: b.dataset.fit });
+  root.querySelector(".pick").onclick = () => ui.file.click();
+  ui.remove.onclick = () => setLook(press, { icon: "", image: "", iw: "", ih: "", fit: "" });
+  ui.file.onchange = () => {
+    if (ui.file.files[0]) loadImage(press, ui.file.files[0]);
+    ui.file.value = "";
+  };
+  root.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    root.classList.add("drop");
+  });
+  root.addEventListener("dragleave", () => root.classList.remove("drop"));
+  root.addEventListener("drop", (e) => {
+    e.preventDefault();
+    root.classList.remove("drop");
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (f) loadImage(press, f);
+  });
+  const K = window.MultiObsKeys;
+  for (const name of (K && K.PICKS) || []) {
+    const b = el("button", "icon");
+    b.type = "button";
+    b.title = ICON_NAMES[name] || name;
+    b.innerHTML = glyphSvg(name, "#e6e8ee");
+    b.onclick = () => setLook(press, { icon: name });
+    ui.icons.appendChild(b);
+    ui.iconBtns[name] = b;
+  }
+  // Texte : enregistré pendant la frappe (la touche suit), sans redessiner le champ.
+  ui.text.oninput = () => {
+    clearTimeout(textTimers[press]);
+    textTimers[press] = setTimeout(() => setLook(press, { text: ui.text.value }, true), 250);
+  };
+  ui.text.onchange = () => {
+    clearTimeout(textTimers[press]);
+    setLook(press, { text: ui.text.value });
+  };
+  ui.notext.onchange = () => setLook(press, { notext: ui.notext.checked });
+  root.querySelector(".look-reset").onclick = () => {
+    ui.text.value = "";
+    setLook(press, null);
+  };
+  return (lookUI[press] = ui);
+}
+
+function lookSummary(l) {
+  const parts = [];
+  if (l.icon === "image" && l.image) parts.push("image");
+  else if (l.icon === "none") parts.push("sans picto");
+  else if (l.icon && ICON_NAMES[l.icon]) parts.push(`picto ${ICON_NAMES[l.icon].toLowerCase()}`);
+  if (l.notext) parts.push("sans texte");
+  else if (l.text && l.text.trim()) parts.push(`« ${l.text.trim()} »`);
+  return parts.join(" · ");
+}
+
+function renderLook(press, s, o) {
+  const root = document.querySelector(`.look[data-press="${press}"]`);
+  root.hidden = kind !== "custom" || o.op === "none";
+  if (root.hidden) return;
+  const ui = lookUI[press] || buildLook(press);
+  const l = getLook(s, press);
+  const sum = lookSummary(l);
+  const open = lookOpen[press] != null ? lookOpen[press] : !!sum;
+  ui.body.hidden = !open;
+  ui.root.classList.toggle("open", open);
+  ui.sum.textContent = sum || "par défaut";
+  ui.sum.classList.toggle("custom", !!sum);
+  ui.chev.textContent = open ? "Fermer ▴" : "Personnaliser ▾";
+  if (!open) return;
+  const icon = l.icon === "image" && !l.image ? "" : l.icon || "";
+  for (const b of ui.seg) b.classList.toggle("selected", b.dataset.icon === icon);
+  ui.seg[0].innerHTML = `${glyphSvg((OPS[o.op] || OPS.none).glyph, "#e6e8ee")}<span>Auto</span>`;
+  ui.seg[1].innerHTML = `${glyphSvg("picture", "#e6e8ee")}<span>Image</span>`;
+  ui.seg[2].innerHTML = `${glyphSvg("none", "#e6e8ee")}<span>Aucun</span>`;
+  for (const [name, b] of Object.entries(ui.iconBtns)) b.classList.toggle("selected", icon === name);
+  ui.zone.hidden = icon !== "image";
+  ui.thumb.style.backgroundImage = l.image ? `url("${l.image}")` : "";
+  ui.thumb.classList.toggle("contain", l.fit === "contain");
+  for (const b of ui.fit) b.classList.toggle("selected", (l.fit || "cover") === b.dataset.fit);
+  if (document.activeElement !== ui.text) ui.text.value = l.text || "";
+  ui.text.disabled = !!l.notext;
+  ui.notext.checked = !!l.notext;
+  const auto = defaultLabel(o);
+  ui.text.placeholder = auto ? `Auto : ${auto}` : "Auto";
+  const live = ["record", "pause", "stream"].includes(o.op);
+  ui.hint.textContent = l.notext ? "Rien d'écrit sur la touche : seulement l'image ou le picto."
+    : live ? "Vide = texte de l'action. Pendant un rec ou un live, le timecode reste affiché."
+      : "Vide = texte de l'action (le nom de la scène, de la source…).";
+}
+
+function loadImage(press, file) {
+  const ui = lookUI[press];
+  if (!/^image\//.test(file.type)) {
+    ui.note.textContent = "Ce fichier n'est pas une image.";
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
+    if (!w || !h) w = h = 144;   // SVG sans taille
+    const k = Math.min(1, 144 / Math.min(w, h), 256 / Math.max(w, h));
+    const cw = Math.max(1, Math.round(w * k));
+    const ch = Math.max(1, Math.round(h * k));
+    const c = document.createElement("canvas");
+    c.width = cw;
+    c.height = ch;
+    const g = c.getContext("2d");
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, 0, 0, cw, ch);
+    const px = g.getImageData(0, 0, cw, ch).data;
+    let alpha = false;
+    for (let i = 3; i < px.length; i += 4) {
+      if (px[i] < 250) {
+        alpha = true;
+        break;
+      }
+    }
+    ui.note.textContent = "ou glisse une image ici";
+    setLook(press, { icon: "image", image: alpha ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.9), iw: cw, ih: ch, fit: alpha ? "contain" : "cover" });
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    ui.note.textContent = "Image illisible : essaie un PNG ou un JPG.";
+  };
+  img.src = url;
 }

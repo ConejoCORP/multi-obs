@@ -30,7 +30,7 @@ Parce que deux OBS lancés normalement partagent le même dossier de configurati
 - 🔗 **Pilotage global** — tout allumer, tout enregistrer, tout mettre en pause d'un clic ; une instance déliée (**Link**) reste à part, pratique pour le live
 - ⏱️ **Départ, pause et arrêt à l'image près** — « Tout enregistrer » aligne le début des fichiers, « Tout en pause » enlève exactement les mêmes images partout, « Tout arrêter » les finit sur la même image : même nombre d'images dans chaque fichier, les pistes se calent d'un coup au montage
 - 🚨 **Alertes immédiates** — rec bloqué, OBS fermé pendant le rec, erreur d'OBS, son qui décroche ou micro perdu, encodeur en panne, images perdues, disque presque plein : bandeau rouge, carte en rouge, bouton de la barre des tâches qui clignote, cadre rouge sur le Stream Deck ; tout se règle dans l'onglet **SafeGuard**
-- 🎛️ **Plugin Stream Deck** — des touches colorées pour chaque OBS ou pour tout Multi OBS : rec avec le timecode, pause, allumer / éteindre, scènes, sources, filtres, son, live… en appui court ou long ; installé en un clic
+- 🎛️ **Plugin Stream Deck** — des touches colorées pour chaque OBS ou pour tout Multi OBS : rec avec le timecode, pause, allumer / éteindre, scènes, sources, filtres, son, live… en appui court ou long, avec ton image, ton texte ou un picto ; installé en un clic
 - 👀 **Aperçu en direct sans compression**, vumètres audio, images perdues, CPU, et alertes (pas de son, disque presque plein, OBS qui attend une réponse) ; durée du rec (en rouge) et du live (en violet, ou la couleur de ton choix) sur l'aperçu
 - 💬 **Chat Twitch en un clic** — le logo Twitch sur la carte de l'OBS du live : le chat de ta chaîne, en sombre, dans une fenêtre à part
 - 🗂️ **Instances réduites** — le bouton **œil barré** range une instance dont tu ne te sers pas (l'OBS du live…) dans une barre en bas, avec son état ; **Remettre** la ramène parmi les autres
@@ -108,11 +108,13 @@ En haut de chaque touche, l'OBS qu'elle pilote : sa couleur et son nom, ou **TOU
 | **Enregistrer** | démarre / arrête le rec, avec le timecode sur la touche. Au choix : appui court = pause et appui long = rec / stop, pour ne jamais couper un rec par erreur |
 | **Pause** | met en pause / reprend, à l'image près avec « Tous » |
 | **Allumer / Éteindre** | allume ou éteint un OBS, ou toutes les instances ; refusé pendant un rec |
-| **Action OBS** | changer de scène, montrer / cacher une source, activer / couper un filtre, couper le son, lancer le live, capture d'écran, rec, pause… et une 2e action en appui long si tu veux (la touche se partage alors en deux) |
+| **Action OBS** | changer de scène, montrer / cacher une source, activer / couper un filtre, couper le son, lancer le live, capture d'écran, rec, pause… et une 2e action en appui long si tu veux (la touche se partage alors en deux). Avec ton image, ton texte ou un picto |
 | **Caméra virtuelle** | allume / éteint la VCam d'un OBS |
 | **Voir OBS** | affiche la fenêtre de l'OBS, ou celle de Multi OBS avec « Tous » |
 
 Pendant un appui long, un cercle blanc grandit jusqu'à couvrir la touche, et l'action part quand il la remplit. Les touches suivent OBS en direct : une scène passée à l'antenne, une source cachée ou un son coupé depuis OBS se voient aussi sur le Stream Deck.
+
+Une **Action OBS** peut prendre ton apparence (réglages de la touche → **Apparence → Personnaliser**) : une **image** (une photo remplit la touche, un logo transparent est posé sur sa couleur), un **texte** à toi (emojis compris) ou l'un des 44 **pictos**, ou seulement l'un des deux en plus grand. Les couleurs d'état restent : une scène à l'antenne encadre l'image en vert, une source cachée la voile.
 
 « Tous » fait comme les boutons du haut de Multi OBS : allumer / éteindre toutes les instances, enregistrer et mettre en pause les instances liées (**Link**). Si Multi OBS est fermé, un appui sur une touche l'ouvre. En cas de problème grave, les touches passent en alerte (voir [Alertes](#alertes)).
 

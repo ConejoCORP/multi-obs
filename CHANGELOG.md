@@ -3,6 +3,20 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.6
+
+- **Stream Deck : ton image, ton texte ou un picto sur les touches « Action OBS »** (idéal pour les
+  changements de scène). Dans les réglages de la touche, sous l'action, **Apparence → Personnaliser** :
+  - **Image** : choisis-la (ou glisse-la). Une photo remplit la touche, un logo transparent est posé entier
+    sur la couleur de la touche. Elle est enregistrée avec la touche et suit les profils exportés.
+  - **Picto** : 44 pictos au choix (manette, webcam, micro, discussion, pause café, étoile…).
+  - **Texte** : remplace le nom de la scène ou de l'action (les emojis marchent), ou « Aucun » pour ne
+    garder que l'image ou le picto, en plus grand. Sans picto, le texte seul s'affiche en grand.
+  - Les couleurs d'état restent : une scène à l'antenne met un cadre vert autour de l'image, une source
+    cachée voile l'image, et pendant un rec ou un live le timecode reste affiché.
+  - Avec un appui long, chaque moitié de la touche a sa propre apparence.
+- Le plugin Stream Deck passe en 1.1.6 : Multi OBS propose de le mettre à jour (en bas à droite).
+
 ## 1.1.5
 
 - **Compatible OBS 33** : OBS 33 range ses modules dans un nouveau dossier `core`, et la préparation des
