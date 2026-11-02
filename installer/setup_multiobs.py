@@ -68,6 +68,20 @@ def wait_for_pid(pid: int, timeout: float = 30) -> None:
         ctypes.windll.kernel32.CloseHandle(handle)
 
 
+def free_old_name(exe: Path) -> Path:
+    """Nom libre pour l'exe remplacé : « Multi OBS.old.exe », ou « .old2 », « .old3 »… quand l'exe d'une
+    mise à jour précédente tourne encore (Multi OBS pas relancé depuis) : verrouillé, il ne peut pas être
+    supprimé. Multi OBS fait le ménage au démarrage."""
+    for n in range(1, 30):
+        old = exe.with_name("Multi OBS.old.exe" if n == 1 else f"Multi OBS.old{n}.exe")
+        try:
+            old.unlink(missing_ok=True)
+            return old
+        except OSError:
+            continue
+    raise OSError("aucun nom libre pour l'ancien exe")
+
+
 def put_exe(target_dir: Path) -> Path:
     """Copie l'appli embarquée à sa place (en gardant l'ancienne en cas d'échec)."""
     src = payload_path()
@@ -75,13 +89,13 @@ def put_exe(target_dir: Path) -> Path:
         raise RuntimeError("Installateur incomplet : l'application n'est pas incluse.")
     target_dir.mkdir(parents=True, exist_ok=True)
     exe = target_dir / installinfo.EXE_NAME
-    old = exe.with_name("Multi OBS.old.exe")
+    old = None
     tmp = exe.with_name("Multi OBS.new.exe")
     shutil.copyfile(src, tmp)
     for _ in range(20):   # l'appli peut mettre un instant à libérer son exe
         try:
             if exe.exists():
-                old.unlink(missing_ok=True)
+                old = free_old_name(exe)
                 exe.rename(old)
             tmp.rename(exe)
             break
@@ -91,7 +105,8 @@ def put_exe(target_dir: Path) -> Path:
         tmp.unlink(missing_ok=True)
         raise RuntimeError("Multi OBS est ouvert : ferme-le, puis relance l'installation.")
     try:
-        old.unlink(missing_ok=True)
+        if old is not None:
+            old.unlink(missing_ok=True)
     except OSError:
         pass   # l'appli le supprimera au prochain démarrage
     return exe

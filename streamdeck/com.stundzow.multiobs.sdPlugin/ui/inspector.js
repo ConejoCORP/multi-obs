@@ -10,6 +10,7 @@ const DEFAULTS = {
   vcam: { target: "" },
   show: { target: "all" },
   custom: { target: "all", short: { op: "pause" }, long: { op: "none" }, longMs: 600 },   // appui long : en option
+  quit: { hold: true, longMs: 600 },
 };
 
 const OPS = {
@@ -40,6 +41,7 @@ const ABOUT = {
   custom: "La touche à tout faire : scène, source, filtre, son, live, capture, rec… Choisis son action, puis son apparence : ton image, ton texte ou un picto. Tu peux ajouter une 2e action en appui long : la touche se partage en deux, et un cercle blanc grandit pendant le maintien.",
   vcam: "Allume ou éteint la caméra virtuelle de l'OBS (« VCam Rouge »…), pour Discord, Zoom ou une autre instance.",
   show: "Affiche la fenêtre de l'OBS pour régler ses scènes. Avec « Tous » : la fenêtre de Multi OBS.",
+  quit: "Ferme Multi OBS. Refusé pendant un enregistrement ou un live, pour ne rien perdre. Quand Multi OBS est fermé, un appui sur la touche l'ouvre.",
 };
 
 let ws = null;
@@ -153,6 +155,9 @@ function render() {
   renderStatus();
   document.getElementById("about").textContent = ABOUT[kind] || "";
   renderTargets(s);
+  document.getElementById("targetSection").hidden = kind === "quit";
+  document.getElementById("quitSection").hidden = kind !== "quit";
+  if (kind === "quit") renderQuit(s);
   const pressing = !!PRESS_OPS[kind];
   document.getElementById("pressSection").hidden = !pressing;
   // « Action OBS » : une action, l'appui long en plus si on veut ; « Enregistrer » : les deux appuis.
@@ -295,6 +300,42 @@ function renderPresses(s) {
   }
   hint.textContent = text;
   hint.hidden = !text;
+}
+
+// ---------------------------------------------------------------- touche « Fermer Multi OBS »
+const ON_CLOSE = {
+  stop: "Tes OBS s'éteignent avec Multi OBS (réglage « Tout éteindre »).",
+  keep: "Tes OBS continuent de tourner, et Multi OBS les reprend à sa prochaine ouverture (réglage « Laisser tourner les instances »).",
+  ask: "Multi OBS passe devant et te demande quoi faire de tes OBS (réglage « Demander »).",
+};
+
+function renderQuit(s) {
+  const box = document.getElementById("quitTiles");
+  box.innerHTML = "";
+  const hold = s.hold !== false;
+  for (const [value, label, glyph] of [[true, "Maintenir la touche (conseillé)", "exit"], [false, "Appui simple", "tap"]]) {
+    const b = el("button", "tile" + (hold === value ? " selected" : ""));
+    b.type = "button";
+    b.style.setProperty("--c", "#476bd7");
+    b.style.setProperty("--ct", rgba("#476bd7", 0.18));
+    const K = window.MultiObsKeys;
+    b.innerHTML = `<svg viewBox="0 0 48 48">${K ? K.glyph(glyph, 24, 24, 44, "#9fb4f5") : ""}</svg><span>${esc(label)}</span>`;
+    b.onclick = () => {
+      if (hold !== value) save({ hold: value });
+    };
+    box.appendChild(b);
+  }
+  document.getElementById("quitDelay").hidden = !hold;
+  const slider = document.getElementById("quitMs");
+  const out = document.getElementById("quitMsOut");
+  const showMs = (v) => (out.textContent = (v / 1000).toLocaleString("fr-FR", { minimumFractionDigits: 1 }) + " s");
+  slider.value = s.longMs || 600;
+  showMs(slider.value);
+  slider.oninput = () => showMs(slider.value);
+  slider.onchange = () => save({ longMs: Number(slider.value) });
+  const where = "Multi OBS → ⚙ → Général → « À la fermeture de Multi OBS ».";
+  const known = ON_CLOSE[state.onClose];
+  document.getElementById("quitHint").textContent = known ? `${known} Modifiable dans ${where}` : `Tes OBS suivent le réglage ${where}`;
 }
 
 // ---------------------------------------------------------------- menus : scène, source, filtre, son

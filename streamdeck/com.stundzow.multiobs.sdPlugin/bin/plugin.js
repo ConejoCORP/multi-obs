@@ -14,7 +14,7 @@ const keys = require("./keys");
 
 const PLUGIN_DIR = path.resolve(__dirname, "..");
 const PREFIX = "com.stundzow.multiobs.";
-const KINDS = ["record", "pause", "power", "vcam", "show", "custom"];
+const KINDS = ["record", "pause", "power", "vcam", "show", "custom", "quit"];
 const OPS = ["record", "pause", "power", "vcam", "show", "scene", "item", "filter", "mute", "stream", "screenshot", "none"];
 const SINGLE_ONLY = ["vcam", "scene", "item", "filter", "mute", "stream", "screenshot"];   // pas avec « Tous »
 const DEFAULTS = {
@@ -24,7 +24,9 @@ const DEFAULTS = {
   vcam: { target: "" },
   show: { target: "all" },
   custom: { target: "all", short: { op: "pause" }, long: { op: "none" }, longMs: 600 },   // appui long : en option
+  quit: { hold: true, longMs: 600 },   // fermer Multi OBS : en maintenant la touche, sauf si on choisit l'appui simple
 };
+const APP_SHADES = ["#718CDC", "#476BD7", "#284CB8", "#213E97", "#1A3278", "#162A64"];   // bleu de Multi OBS
 const SEP = "\u001f";   // clés de suivi de Multi OBS : type, puis noms
 const LOCAL = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 const DISCOVERY = process.env.MULTIOBS_REMOTE_FILE || path.join(LOCAL, "Multi OBS", "remote.json");
@@ -377,6 +379,12 @@ function knownInstances() {
 // ------------------------------------------------------------------ appuis
 function opsFor(a, inMultiAction) {
   const s = a.settings;
+  if (a.kind === "quit") {
+    // Multi OBS fermé : un appui l'ouvre. Ouvert : maintenir pour le fermer (un appui court explique quoi faire).
+    if (!link.connected) return { short: { op: "open" }, long: null };
+    const quit = { op: "quit" };
+    return s.hold === false || inMultiAction ? { short: quit, long: null } : { short: { op: "quithint" }, long: quit };
+  }
   if (a.kind === "record") {
     const short = ["record", "pause"].includes(s.short) ? s.short : "record";
     const long = ["record", "pause"].includes(s.long) && !inMultiAction ? s.long : null;
@@ -450,6 +458,10 @@ function flash(a, lines) {
 
 async function run(a, o) {
   if (!o) return;
+  if (a.kind === "quit") {
+    runQuit(a, o);
+    return;
+  }
   const target = a.settings.target;
   if (!target || (target === "all" && SINGLE_ONLY.includes(o.op))) {
     flash(a, ["CHOISIS", "UN OBS"]);
@@ -475,6 +487,21 @@ async function run(a, o) {
   const res = await command(target, o.op, "toggle", params);
   if (!res.ok) flash(a, splitReason(res.reason));
   else if (o.op === "screenshot" && !a.transient) sdSend({ event: "showOk", context: a.ctx });
+}
+
+// Fermer Multi OBS : il suit son réglage « À la fermeture » ; refusé pendant un rec ou un live.
+async function runQuit(a, o) {
+  if (o.op === "open" || !link.connected) {
+    launchMultiObs(null);
+    return;
+  }
+  if (o.op === "quithint") {
+    flash(a, ["MAINTIENS", "POUR FERMER"]);
+    return;
+  }
+  log("Fermeture de Multi OBS demandée");
+  const res = await command("app", "quit");
+  if (!res.ok) flash(a, splitReason(res.reason));
 }
 
 // ------------------------------------------------------------------ dessin
@@ -577,6 +604,21 @@ function model(a) {
     m.fired = press.fired;
   }
   if (a.message && Date.now() < a.message.until) m.message = a.message.lines;
+  if (a.kind === "quit") {
+    m.band = { name: "Multi OBS", shades: APP_SHADES };
+    if (!link.connected) {
+      m.phase = link.launching ? "launching" : link.exeMissing ? "nofile" : "offline";
+      m.band.dim = true;
+      return m;
+    }
+    const insts = link.state.instances;
+    const recording = insts.some((i) => i.recording);
+    m.phase = "ready";
+    m.busy = recording || insts.some((i) => i.streaming);   // fermeture refusée : touche grisée
+    m.recDot = recording;
+    m.blink = Math.floor(Date.now() / 1000) % 2 === 0;
+    return m;
+  }
   if (!s.target || (a.kind === "vcam" && all)) {
     m.phase = "unset";
     m.band = { name: "?" };
@@ -674,6 +716,7 @@ function inspectorPayload() {
     version: link.version,
     pluginVersion: VERSION,
     exeFound: !!multiObsExe(),
+    onClose: (link.state && link.state.onClose) || "",   // réglage « À la fermeture de Multi OBS » (touche Fermer)
     instances: knownInstances().map((i) => ({
       id: i.id, name: i.name, color: i.color, colorName: i.colorName, shades: i.shades,
       linked: i.linked !== false, minimized: !!i.minimized, status: i.status || "unknown",
@@ -688,7 +731,7 @@ function sendToInspector(a) {
 
 function notifyInspectors(force) {
   const p = inspectorPayload();
-  const sig = JSON.stringify([p.connected, p.launching, p.instances.map((i) => [i.id, i.name, i.color, i.linked, i.minimized, i.status])]);
+  const sig = JSON.stringify([p.connected, p.launching, p.onClose, p.instances.map((i) => [i.id, i.name, i.color, i.linked, i.minimized, i.status])]);
   if (!force && sig === link.piSig) return;
   link.piSig = sig;
   for (const a of actions.values()) if (a.pi) sdSend({ event: "sendToPropertyInspector", action: a.uuid, context: a.ctx, payload: p });

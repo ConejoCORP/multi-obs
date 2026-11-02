@@ -969,6 +969,40 @@ class MainWindow(QMainWindow):
         self._vcam_task = task
         task.start()
 
+    def remote_quit(self) -> str:
+        """Fermeture demandée par le Stream Deck : comme la croix, selon « À la fermeture de Multi OBS », mais
+        sans question sur un rec (refusé, comme éteindre) ni sur une conversion MP4 (attendue). Renvoie "" si
+        Multi OBS se ferme, sinon la raison affichée sur la touche."""
+        ctrls = list(self.manager.controllers.values())
+        if any(c.recording for c in ctrls):
+            return "REC en cours"
+        if any(c.streaming for c in ctrls):
+            return "Live en cours"
+        running = [c for c in ctrls if c.running]
+        choice = self.manager.settings.get("on_close", "ask")
+        if running and choice not in ("keep", "stop"):
+            QTimer.singleShot(0, self._show_and_close)   # la question habituelle, fenêtre au premier plan
+            return "Réponds dans Multi OBS"
+        if running and choice == "stop" and any(c.remux is not None for c in running):
+            for c in running:
+                if c.remux is not None:   # conversion MP4 : l'OBS s'éteint à la fin, puis Multi OBS se ferme
+                    c.close_after_conversion()
+                elif not c.shutdown_gracefully():
+                    c.kill()
+            self._close_choice = "stop"
+            self._quit_when_off()
+            return "Fermeture après la conversion"
+        QTimer.singleShot(0, self.close)   # après la réponse au Stream Deck
+        return ""
+
+    def _show_and_close(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        winapi.bring_to_front(int(self.winId()))
+        self.close()
+
     def quit_for_update(self) -> None:
         """Ferme Multi OBS sans rien demander : les instances continuent de tourner et
         la nouvelle version les reprend au démarrage."""

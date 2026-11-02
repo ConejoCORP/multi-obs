@@ -21,7 +21,7 @@ const band = { name: "Multi OBS", shades: ["#6b7080", "#5b6273", "#4e5566", "#3c
 const base = { band, phase: "ready", rec: "idle", recMs: 0 };
 const views = [{ glyph: "pause", tone: "idle", label: "PAUSE" }, { glyph: "rec", tone: "idle", label: "REC" }];
 const out = { keys: {}, actions: {} };
-for (const kind of ["record", "pause", "power", "custom", "vcam", "show"]) {
+for (const kind of ["record", "pause", "power", "custom", "vcam", "show", "quit"]) {
   out.keys[kind] = keys.render({ ...base, kind, views: views.slice(0, 1), vcam: false });   // une action par défaut
 }
 const icon = (name, color, accent) =>
@@ -33,6 +33,7 @@ out.actions = {
   custom: icon("tap", "#b497ff"),
   vcam: icon("camera", "#16b1f3"),
   show: icon("eye", "#ffffff"),
+  quit: icon("exit", "#ff7a85"),
 };
 process.stdout.write(JSON.stringify(out));
 """

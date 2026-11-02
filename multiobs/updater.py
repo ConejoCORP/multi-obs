@@ -22,15 +22,21 @@ FROZEN = getattr(sys, "frozen", False)
 
 
 def cleanup_old_exe() -> None:
-    """Supprime l'ancien exe laissé par une mise à jour (réessaie s'il est encore verrouillé)."""
+    """Supprime les anciens exe laissés par les mises à jour (« Multi OBS.old.exe », « .old2 »…) ;
+    réessaie tant qu'un est encore verrouillé (ancienne version encore ouverte)."""
     if not FROZEN:
         return
-    old = Path(sys.executable).with_name("Multi OBS.old.exe")
-    if old.exists():
+    me = Path(sys.executable).resolve()
+    locked = False
+    for old in me.parent.glob("Multi OBS.old*.exe"):
+        if old.resolve() == me:
+            continue
         try:
             old.unlink()
         except OSError:
-            QTimer.singleShot(5000, cleanup_old_exe)
+            locked = True
+    if locked:
+        QTimer.singleShot(5000, cleanup_old_exe)
 
 
 class UpdateChecker(QObject):

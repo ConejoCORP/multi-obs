@@ -13,10 +13,21 @@
 
   <p id="about" class="about"></p>
 
-  <section>
+  <section id="targetSection">
     <h2><span class="num">1</span>Quel OBS ?</h2>
     <div id="targets" class="chips"></div>
     <p id="targetHint" class="hint"></p>
+  </section>
+
+  <section id="quitSection" hidden>
+    <h2><span class="num">1</span>Comment fermer ?</h2>
+    <div id="quitTiles" class="tiles"></div>
+    <div id="quitDelay" class="delay">
+      <span>Durée du maintien</span>
+      <input type="range" id="quitMs" min="300" max="1500" step="100">
+      <output id="quitMsOut"></output>
+    </div>
+    <p id="quitHint" class="hint"></p>
   </section>
 
   <section id="pressSection" hidden>

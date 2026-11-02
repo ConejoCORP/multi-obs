@@ -262,6 +262,9 @@
       case "check":
         g = `<circle cx="24" cy="24" r="19" ${line} stroke-width="4"/><path d="M15 24.5 L21.5 31 L33 18" ${line} stroke-width="4.5"/>`;
         break;
+      case "exit":
+        g = `<path d="M21 6 H10 C7.5 6 6 7.5 6 10 V38 C6 40.5 7.5 42 10 42 H21" ${line} stroke-width="4"/><path d="M18 24 H42 M32 14 L42 24 L32 34" ${line} stroke-width="4.5"/>`;
+        break;
       case "arrow":
         g = `<path d="M6 24 H40 M28 12 L40 24 L28 36" ${line} stroke-width="4.5"/>`;
         break;
@@ -476,6 +479,11 @@
     return tone === "off" || tone === "dim" ? ' opacity="0.4"' : "";
   }
 
+  // Fermer Multi OBS : grisée pendant un rec ou un live (fermeture refusée).
+  function quitBody(m) {
+    return m.busy ? iconLabel(C.idle, "exit", "#6f7480", "FERMER", C.muted) : iconLabel(C.idle, "exit", C.ink, "FERMER");
+  }
+
   // Touche « Action OBS » : une action (toute la touche) ou deux (appui court à gauche, long à droite).
   // Apparence au choix : picto, image, texte, ou seulement l'un d'eux en plus grand.
   function viewBody(v) {
@@ -533,7 +541,7 @@
   }
 
   function offlineBody(m) {
-    const name = { record: "rec", pause: "pause", power: "power", vcam: "camera", show: "eye", custom: "tap" }[m.kind];
+    const name = { record: "rec", pause: "pause", power: "power", vcam: "camera", show: "eye", custom: "tap", quit: "exit" }[m.kind];
     if (m.phase === "launching") return iconLabel(C.idle, name, C.soft, "OUVERTURE…", C.soft, "#8c3341");
     if (m.phase === "nofile") return lines(C.off, "MULTI OBS", "INTROUVABLE", C.muted);
     return iconLabel(C.off, name, C.offInk, "FERMÉ", C.muted, "#5c2a33");
@@ -550,7 +558,7 @@
     else if (m.phase === "unset") content = lines(C.off, "CHOISIS", "UN OBS", C.soft);
     else if (m.phase === "missing") content = lines(C.off, "OBS", "INTROUVABLE", C.muted);
     else {
-      content = { record: recordBody, pause: pauseBody, power: powerBody, vcam: vcamBody, show: showBody, custom: customBody }[m.kind](m);
+      content = { record: recordBody, pause: pauseBody, power: powerBody, vcam: vcamBody, show: showBody, custom: customBody, quit: quitBody }[m.kind](m);
       if (m.fired) content = inverted(content);   // appui long parti : toute la touche en négatif
       else if (m.press != null) content += holdLayer(content, m.press);
     }

@@ -3,6 +3,20 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.7
+
+- **Stream Deck : touche « Fermer Multi OBS »**. Maintiens-la (un cercle blanc grandit) et Multi OBS se
+  ferme, en suivant ton réglage ⚙ → Général → « À la fermeture de Multi OBS » : tes OBS s'éteignent avec
+  « Tout éteindre », continuent avec « Laisser tourner les instances », et avec « Demander » Multi OBS passe
+  devant pour te poser la question. Un simple appui affiche « Maintiens pour fermer » ; l'appui simple peut
+  suffire si tu préfères (réglages de la touche).
+  - Refusée pendant un enregistrement ou un live, pour ne rien perdre ; une conversion MP4 en cours est
+    terminée d'abord. Pendant un rec, la touche est grisée.
+  - Quand Multi OBS est fermé, un appui sur la touche le rouvre.
+- Le plugin Stream Deck passe en 1.1.7 : Multi OBS propose de le mettre à jour (en bas à droite).
+- Mise à jour : l'installation ne s'arrête plus sur une erreur quand deux mises à jour se suivent sans que
+  Multi OBS ait été relancé entre les deux.
+
 ## 1.1.6
 
 - **Stream Deck : ton image, ton texte ou un picto sur les touches « Action OBS »** (idéal pour les

@@ -16,6 +16,7 @@ Messages (JSON) :
   client → {"op": "cmd", "id": 7, "target": "inst1" | "all", "action": "record", "mode": "toggle" | "on" | "off",
             "params": {"scene": "…", "source": "…", "filter": "…", "input": "…"}}
   serveur → {"op": "result", "id": 7, "ok": true, "reason": ""}
+  client → {"op": "cmd", "id": 9, "target": "app", "action": "quit"}   (fermer Multi OBS, depuis la 1.1.7)
   client → {"op": "list", "id": 8, "target": "inst1", "what": "scenes" | "items" | "sources" | "filters" | "audio",
             "params": {"scene": "…", "source": "…"}}
   serveur → {"op": "list", "id": 8, "ok": true, "items": ["…"], "reason": ""}
@@ -250,7 +251,8 @@ class RemoteServer(QObject):
                 "mutes": dict(c.mutes),
                 "watch": {SEP.join(k): v for k, v in c.watched.items()},
             })
-        return {"version": APP_VERSION, "instances": insts, "all": self._global(insts)}
+        return {"version": APP_VERSION, "instances": insts, "all": self._global(insts),
+                "onClose": m.settings.get("on_close", "ask")}
 
     def _global(self, insts: list[dict]) -> dict:
         """Ce que pilotent les touches « Tous » : comme les boutons du haut de Multi OBS
@@ -288,8 +290,8 @@ class RemoteServer(QObject):
         durées lui-même ; on ne renvoie l'état que s'il a vraiment changé."""
         def strip(d: dict) -> dict:
             return {k: (bool(v) if k == "alert" else v) for k, v in d.items() if k not in ("recMs", "streamMs")}
-        return json.dumps({"i": [strip(i) for i in state["instances"]], "a": strip(state["all"])},
-                          sort_keys=True)
+        return json.dumps({"i": [strip(i) for i in state["instances"]], "a": strip(state["all"]),
+                           "c": state.get("onClose")}, sort_keys=True)
 
     def _broadcast(self) -> None:
         socks = [s for s, c in self.clients.items() if c["auth"]]
@@ -314,6 +316,8 @@ class RemoteServer(QObject):
                 reply=None) -> str | None:
         """Lance la commande. Renvoie "" si c'est parti, la raison d'un refus (courte), ou None si
         la réponse viendra plus tard par reply(raison) (actions OBS : scène, filtre…)."""
+        if action == "quit":   # fermer Multi OBS (selon « À la fermeture de Multi OBS »)
+            return self.window.remote_quit()
         if action not in ACTIONS + OBS_ACTIONS:
             return "Action inconnue"
         if target == "all":
