@@ -3,6 +3,20 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.8
+
+- **Stream Deck : 97 pictos au lieu de 44** pour l'apparence des touches « Action OBS », rangés par
+  groupes dans les réglages de la touche :
+  - **Flèches** : gauche, droite, haut, bas, les 4 diagonales, gauche-droite, haut-bas, précédent / suivant,
+    retour, recharger, échanger, plein écran.
+  - **Scènes et écrans** : ordinateur portable, fenêtre, écran partagé, incrustation, mosaïque, zoom,
+    curseur, clavier, souris… en plus de ceux d'avant.
+  - **Moments du live** : sablier (« ça commence » / BRB), repas, jour, planning, annonce, cadeau,
+    couronne, fusée…
+  - **Personnes, Jeu, Son, Symboles, Commandes** : groupe, sourire, viseur, épée, bouclier, tête de mort,
+    dé, croix, plus, moins, info, attention, question, cadenas, repère, rond, carré, triangle, losange…
+- Le plugin Stream Deck passe en 1.1.8 : Multi OBS propose de le mettre à jour (en bas à droite).
+
 ## 1.1.7
 
 - **Stream Deck : touche « Fermer Multi OBS »**. Maintiens-la (un cercle blanc grandit) et Multi OBS se

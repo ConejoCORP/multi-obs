@@ -427,8 +427,20 @@ const ICON_NAMES = {
   music: "Musique", picture: "Image", photo: "Photo", film: "Vidéo", pencil: "Dessin", code: "Code", coffee: "Pause café",
   clock: "Horloge", moon: "Nuit", home: "Accueil", phone: "Téléphone", star: "Étoile", heart: "Cœur", fire: "Feu",
   bolt: "Éclair", sparkle: "Étincelle", bulb: "Idée", bell: "Cloche", trophy: "Trophée", flag: "Drapeau", check: "Validé",
-  arrow: "Suivant", live: "Live", rec: "Rec", pause: "Pause", play: "Lecture", stop: "Stop", power: "Marche",
-  eye: "Visible", eyeoff: "Caché", filter: "Filtre",
+  live: "Live", rec: "Rec", pause: "Pause", play: "Lecture", stop: "Stop", power: "Marche",
+  eye: "Visible", eyeoff: "Caché", filter: "Filtre", exit: "Sortie",
+  left: "Gauche", arrow: "Droite", up: "Haut", down: "Bas", upleft: "Haut gauche", upright: "Haut droite",
+  downleft: "Bas gauche", downright: "Bas droite", leftright: "Gauche-droite", updown: "Haut-bas", prev: "Précédent",
+  next: "Suivant", back: "Retour", refresh: "Recharger", swap: "Échanger", expand: "Plein écran",
+  laptop: "Ordinateur portable", window: "Fenêtre", split: "Écran partagé", pip: "Incrustation", grid: "Mosaïque",
+  zoom: "Zoom", cursor: "Curseur", keyboard: "Clavier", mouse: "Souris",
+  hourglass: "Ça commence / BRB", food: "Repas", sun: "Jour", calendar: "Planning", megaphone: "Annonce",
+  gift: "Cadeau", crown: "Couronne", rocket: "Fusée",
+  group: "Groupe", smile: "Sourire",
+  target: "Viseur", sword: "Épée", shield: "Bouclier", skull: "Tête de mort", dice: "Dé",
+  close: "Croix", plus: "Plus", minus: "Moins", info: "Info", warning: "Attention", question: "Question",
+  lock: "Verrouillé", unlock: "Déverrouillé", pin: "Repère", circle: "Rond", square: "Carré", triangle: "Triangle",
+  diamond: "Losange",
 };
 const lookUI = {};
 const lookOpen = {};    // panneau ouvert / fermé par l'utilisateur (sinon : ouvert si l'apparence est perso)
@@ -540,14 +552,17 @@ function buildLook(press) {
     if (f) loadImage(press, f);
   });
   const K = window.MultiObsKeys;
-  for (const name of (K && K.PICKS) || []) {
-    const b = el("button", "icon");
-    b.type = "button";
-    b.title = ICON_NAMES[name] || name;
-    b.innerHTML = glyphSvg(name, "#e6e8ee");
-    b.onclick = () => setLook(press, { icon: name });
-    ui.icons.appendChild(b);
-    ui.iconBtns[name] = b;
+  for (const [title, names] of (K && K.PICK_GROUPS) || []) {
+    ui.icons.appendChild(el("div", "icons-group", esc(title)));
+    for (const name of names) {
+      const b = el("button", "icon");
+      b.type = "button";
+      b.title = ICON_NAMES[name] || name;
+      b.innerHTML = glyphSvg(name, "#e6e8ee");
+      b.onclick = () => setLook(press, { icon: name });
+      ui.icons.appendChild(b);
+      ui.iconBtns[name] = b;
+    }
   }
   // Texte : enregistré pendant la frappe (la touche suit), sans redessiner le champ.
   ui.text.oninput = () => {

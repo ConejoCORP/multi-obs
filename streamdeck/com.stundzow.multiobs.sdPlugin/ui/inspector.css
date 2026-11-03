@@ -216,6 +216,14 @@ h2 .sub { color: var(--muted); font-weight: 400; }
   gap: 4px;
   margin-top: 8px;
 }
+.icons-group {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.icons-group:first-child { margin-top: 0; }
 .icon {
   display: flex;
   align-items: center;

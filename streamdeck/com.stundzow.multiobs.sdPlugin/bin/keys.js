@@ -116,12 +116,37 @@
   }
 
   // ---------------------------------------------------------------- pictos (boîte de 48)
+  // Flèche passant par le centre, orientée à « deg » degrés (0 = droite, 90 = bas) : coordonnées calculées,
+  // pas de rotate(). r : demi-longueur, h : longueur des branches de la pointe, both : pointe aux deux bouts.
+  function arrowPath(deg, r, h, both) {
+    const a = (deg * Math.PI) / 180;
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    const P = (x, y) => `${(24 + x).toFixed(2)} ${(24 + y).toFixed(2)}`;
+    const head = (s) => {
+      const tx = s * r * ux;
+      const ty = s * r * uy;
+      const arm = (rot) => [tx + h * (s * ux * Math.cos(rot) - s * uy * Math.sin(rot)),
+        ty + h * (s * ux * Math.sin(rot) + s * uy * Math.cos(rot))];
+      const [ax, ay] = arm(Math.PI * 0.75);
+      const [bx, by] = arm(-Math.PI * 0.75);
+      return ` M${P(ax, ay)} L${P(tx, ty)} L${P(bx, by)}`;
+    };
+    return `M${P(-r * ux, -r * uy)} L${P(r * ux, r * uy)}${head(1)}${both ? head(-1) : ""}`;
+  }
+  const ARROWS = { arrow: 0, downright: 45, down: 90, downleft: 135, left: 180, upleft: 225, up: 270, upright: 315 };
+
   function glyph(name, cx, cy, size, color, accent) {
     const k = size / 48;
     const t = `transform="translate(${(cx - 24 * k).toFixed(2)} ${(cy - 24 * k).toFixed(2)}) scale(${k.toFixed(4)})"`;
     const line = `fill="none" stroke="${color}" stroke-linecap="round" stroke-linejoin="round"`;
     const eye = `<path d="M3 24 C10 12.5 16.5 9 24 9 C31.5 9 38 12.5 45 24 C38 35.5 31.5 39 24 39 C16.5 39 10 35.5 3 24 Z" ${line} stroke-width="4"/>`;
     const speaker = `<path d="M5 18 H13 L24 9 V39 L13 30 H5 Z" fill="${color}" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
+    const fill = `fill="${color}" stroke="${color}" stroke-linejoin="round"`;
+    if (Object.prototype.hasOwnProperty.call(ARROWS, name)) {
+      const diag = ARROWS[name] % 90 !== 0;
+      return `<g ${t}><path d="${arrowPath(ARROWS[name], diag ? 21 : 18, 17)}" ${line} stroke-width="4.5"/></g>`;
+    }
     let g = "";
     switch (name) {
       case "rec":
@@ -265,8 +290,157 @@
       case "exit":
         g = `<path d="M21 6 H10 C7.5 6 6 7.5 6 10 V38 C6 40.5 7.5 42 10 42 H21" ${line} stroke-width="4"/><path d="M18 24 H42 M32 14 L42 24 L32 34" ${line} stroke-width="4.5"/>`;
         break;
-      case "arrow":
-        g = `<path d="M6 24 H40 M28 12 L40 24 L28 36" ${line} stroke-width="4.5"/>`;
+      // Flèches (les 8 directions simples : ARROWS plus haut)
+      case "leftright":
+        g = `<path d="${arrowPath(0, 20, 13, true)}" ${line} stroke-width="4.5"/>`;
+        break;
+      case "updown":
+        g = `<path d="${arrowPath(90, 20, 13, true)}" ${line} stroke-width="4.5"/>`;
+        break;
+      case "next":
+        g = `<path d="M7 10 L29 24 L7 38 Z" ${fill} stroke-width="3"/><rect x="33" y="9" width="8" height="30" rx="2.5" fill="${color}"/>`;
+        break;
+      case "prev":
+        g = `<path d="M41 10 L19 24 L41 38 Z" ${fill} stroke-width="3"/><rect x="7" y="9" width="8" height="30" rx="2.5" fill="${color}"/>`;
+        break;
+      case "back":
+        g = `<path d="M18 9 L9 18 L18 27" ${line} stroke-width="4.5"/><path d="M10 18 H29 C37 18 42 23.5 42 30 C42 36.5 37 42 29 42 H20" ${line} stroke-width="4.5"/>`;
+        break;
+      case "refresh":
+        g = `<path d="M31.50 11.01 A15 15 0 1 1 13.39 13.39" ${line} stroke-width="4.5"/><path d="M18.34 8.44 L7.38 10.21 L16.58 19.40 Z" ${fill} stroke-width="2"/>`;
+        break;
+      case "swap":
+        g = `<path d="M7 15 H39 M31 7 L39 15 L31 23 M41 33 H9 M17 25 L9 33 L17 41" ${line} stroke-width="4.2"/>`;
+        break;
+      case "expand":
+        g = `<path d="M5 17 V5 H17 M31 5 H43 V17 M43 31 V43 H31 M17 43 H5 V31" ${line} stroke-width="4.5"/><path d="M14 14 L20 20 M34 14 L28 20 M34 34 L28 28 M14 34 L20 28" ${line} stroke-width="3.5"/>`;
+        break;
+      // Scènes et écrans
+      case "laptop":
+        g = `<rect x="9" y="8" width="30" height="22" rx="3" ${line} stroke-width="4"/><path d="M3 35 H45 L42 40 H6 Z" ${fill} stroke-width="2"/>`;
+        break;
+      case "window":
+        g = `<rect x="4" y="7" width="40" height="34" rx="5" ${line} stroke-width="4"/><path d="M9 7 H39 C42 7 44 9 44 12 V17 H4 V12 C4 9 6 7 9 7 Z" fill="${color}"/>`;
+        break;
+      case "split":
+        g = `<rect x="3" y="9" width="19" height="30" rx="4" fill="${color}"/><rect x="26" y="9" width="19" height="30" rx="4" fill="${color}"/>`;
+        break;
+      case "pip":
+        g = `<rect x="4" y="8" width="40" height="32" rx="5" ${line} stroke-width="4"/><rect x="24" y="23" width="15" height="12" rx="2.5" fill="${color}"/>`;
+        break;
+      case "grid":
+        g = [[4, 7], [26, 7], [4, 26], [26, 26]].map(([x, y]) => `<rect x="${x}" y="${y}" width="18" height="15" rx="3" fill="${color}"/>`).join("");
+        break;
+      case "zoom":
+        g = `<circle cx="20" cy="20" r="14" ${line} stroke-width="4"/><path d="M30.5 30.5 L42 42" ${line} stroke-width="5.5"/><path d="M14 20 H26 M20 14 V26" ${line} stroke-width="3.5"/>`;
+        break;
+      case "cursor":
+        g = `<path d="M12 5 V37 L20 29.5 L25.5 42 L31 39.5 L25.5 27.5 H36 Z" ${fill} stroke-width="2.5"/>`;
+        break;
+      case "keyboard":
+        g = `<rect x="3" y="11" width="42" height="26" rx="4" ${line} stroke-width="3.5"/>`
+          + [7, 13, 19, 25, 31, 37].map((x) => `<rect x="${x}" y="16" width="4" height="4" rx="1" fill="${color}"/>`).join("")
+          + [10, 16, 22, 28, 34].map((x) => `<rect x="${x}" y="22" width="4" height="4" rx="1" fill="${color}"/>`).join("")
+          + `<rect x="13" y="29" width="22" height="3.5" rx="1.5" fill="${color}"/>`;
+        break;
+      case "mouse":
+        g = `<path d="M24 4 C33 4 38 10 38 19 V30 C38 38.5 32 44 24 44 C16 44 10 38.5 10 30 V19 C10 10 15 4 24 4 Z" ${line} stroke-width="4"/><path d="M24 11 V18" ${line} stroke-width="4.5"/>`;
+        break;
+      // Moments du live
+      case "hourglass":
+        g = `<path d="M10 5 H38 M10 43 H38" ${line} stroke-width="4"/><path d="M14 6 C14 16 20.5 19 20.5 24 C20.5 29 14 32 14 42 H34 C34 32 27.5 29 27.5 24 C27.5 19 34 16 34 6" ${line} stroke-width="3.5"/>`
+          + `<path d="M18 40 C18 34.5 22 31.5 24 29.5 C26 31.5 30 34.5 30 40 Z" fill="${color}"/><path d="M19 12 H29 C28 15.5 25.5 17.5 24 19.5 C22.5 17.5 20 15.5 19 12 Z" fill="${color}"/>`;
+        break;
+      case "sun":
+        g = `<circle cx="24" cy="24" r="8.5" fill="${color}"/><path d="M37.50 24.00 L43.50 24.00 M33.55 33.55 L37.79 37.79 M24.00 37.50 L24.00 43.50 M14.45 33.55 L10.21 37.79 M10.50 24.00 L4.50 24.00 M14.45 14.45 L10.21 10.21 M24.00 10.50 L24.00 4.50 M33.55 14.45 L37.79 10.21" ${line} stroke-width="4"/>`;
+        break;
+      case "calendar":
+        g = `<rect x="5" y="9" width="38" height="34" rx="5" ${line} stroke-width="4"/><path d="M10 9 H38 C41 9 43 11 43 14 V19 H5 V14 C5 11 7 9 10 9 Z" fill="${color}"/><path d="M15 4 V12 M33 4 V12" ${line} stroke-width="4"/>`
+          + [[11, 25], [21.5, 25], [32, 25], [11, 33], [21.5, 33]].map(([x, y]) => `<rect x="${x}" y="${y}" width="5" height="5" rx="1.2" fill="${color}"/>`).join("");
+        break;
+      case "food":
+        g = `<path d="M10 5 V16 C10 20 12.5 22 15 22 C17.5 22 20 20 20 16 V5 M15 5 V43" ${line} stroke-width="3.8"/><path d="M33 5 C38.5 9 40 17 40 26 H33 Z" ${fill} stroke-width="2"/><path d="M34 26 V43" ${line} stroke-width="4.5"/>`;
+        break;
+      case "megaphone":
+        g = `<path d="M5 18 H14 L34 7 V41 L14 30 H5 Z" ${fill} stroke-width="2.5"/><path d="M12 30 L15 42 H21 L19 30" ${line} stroke-width="3.5"/><path d="M39 17 L44 14 M40 24 H45 M39 31 L44 34" ${line} stroke-width="3.5"/>`;
+        break;
+      case "gift":
+        g = `<rect x="4" y="14" width="40" height="8" rx="2" fill="${color}"/><rect x="7.5" y="22" width="33" height="21" rx="2" ${line} stroke-width="4"/><path d="M24 14 V43" ${line} stroke-width="4"/>`
+          + `<path d="M24 14 C20 6 12 6 13.5 11 C14.5 14 20 14 24 14 C28 14 33.5 14 34.5 11 C36 6 28 6 24 14 Z" ${line} stroke-width="3.2"/>`;
+        break;
+      case "crown":
+        g = `<path d="M6 14 L15 25 L24 8 L33 25 L42 14 L38.5 36 H9.5 Z" ${fill} stroke-width="3"/><rect x="9.5" y="39" width="29" height="5" rx="2" fill="${color}"/>`;
+        break;
+      case "rocket":
+        g = `<path d="M24 3 C32 9 35 18 34 31 H14 C13 18 16 9 24 3 Z" ${line} stroke-width="4"/><circle cx="24" cy="18" r="4" fill="${color}"/>`
+          + `<path d="M14 23 L7 31 V38 L14 34 M34 23 L41 31 V38 L34 34" ${line} stroke-width="3.5"/><path d="M19 35 L24 44 L29 35" ${line} stroke-width="3.5"/>`;
+        break;
+      // Personnes
+      case "group":
+        g = `<circle cx="24" cy="14" r="7" fill="${color}"/><path d="M11 43 C11 33 16.5 28 24 28 C31.5 28 37 33 37 43 Z" fill="${color}"/>`
+          + `<circle cx="9.5" cy="18" r="4.5" ${line} stroke-width="3"/><path d="M2.5 38 C2.5 31.5 5.5 28 10.5 28" ${line} stroke-width="3"/>`
+          + `<circle cx="38.5" cy="18" r="4.5" ${line} stroke-width="3"/><path d="M45.5 38 C45.5 31.5 42.5 28 37.5 28" ${line} stroke-width="3"/>`;
+        break;
+      case "smile":
+        g = `<circle cx="24" cy="24" r="19" ${line} stroke-width="4"/><circle cx="17" cy="19" r="2.9" fill="${color}"/><circle cx="31" cy="19" r="2.9" fill="${color}"/><path d="M15 28 C18 34.5 30 34.5 33 28" ${line} stroke-width="4"/>`;
+        break;
+      // Jeu
+      case "target":
+        g = `<circle cx="24" cy="24" r="15" ${line} stroke-width="4"/><path d="M24 3 V14 M24 34 V45 M3 24 H14 M34 24 H45" ${line} stroke-width="4"/><circle cx="24" cy="24" r="3.2" fill="${color}"/>`;
+        break;
+      case "sword":
+        g = `<path d="M44 4 V10.5 L21 33.5 L14.5 27 L37.5 4 Z" ${fill} stroke-width="2"/><path d="M10 25 L23 38" ${line} stroke-width="4.5"/><path d="M16.5 31.5 L8.5 39.5" ${line} stroke-width="5"/><circle cx="6.5" cy="41.5" r="3.2" fill="${color}"/>`;
+        break;
+      case "shield":
+        g = `<path d="M24 4 L41 10 V22 C41 33 33.5 40.5 24 44 C14.5 40.5 7 33 7 22 V10 Z" ${line} stroke-width="4"/><path d="M24 4 V44 C14.5 40.5 7 33 7 22 V10 Z" fill="${color}"/>`;
+        break;
+      case "skull":
+        g = `<path d="M24 4 C34.5 4 42 11.5 42 21 C42 27 39 31 35 33 V39 C35 41.5 33.5 43 31 43 H17 C14.5 43 13 41.5 13 39 V33 C9 31 6 27 6 21 C6 11.5 13.5 4 24 4 Z" ${line} stroke-width="4"/>`
+          + `<circle cx="16.5" cy="22" r="4.6" fill="${color}"/><circle cx="31.5" cy="22" r="4.6" fill="${color}"/><path d="M24 28 L21.5 32 H26.5 Z" ${fill} stroke-width="1.5"/><path d="M20 36 V43 M28 36 V43" ${line} stroke-width="3"/>`;
+        break;
+      case "dice":
+        g = `<rect x="6" y="6" width="36" height="36" rx="8" ${line} stroke-width="4"/>`
+          + [[15, 15], [33, 15], [24, 24], [15, 33], [33, 33]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.4" fill="${color}"/>`).join("");
+        break;
+      // Symboles
+      case "close":
+        g = `<path d="M10 10 L38 38 M38 10 L10 38" ${line} stroke-width="5.5"/>`;
+        break;
+      case "plus":
+        g = `<path d="M24 7 V41 M7 24 H41" ${line} stroke-width="5.5"/>`;
+        break;
+      case "minus":
+        g = `<path d="M7 24 H41" ${line} stroke-width="5.5"/>`;
+        break;
+      case "info":
+        g = `<circle cx="24" cy="24" r="19" ${line} stroke-width="4"/><circle cx="24" cy="14.5" r="3" fill="${color}"/><path d="M24 21.5 V35" ${line} stroke-width="4.5"/>`;
+        break;
+      case "warning":
+        g = `<path d="M24 5 L44.5 41 H3.5 Z" ${line} stroke-width="4"/><path d="M24 17 V28" ${line} stroke-width="4.5"/><circle cx="24" cy="34.5" r="2.8" fill="${color}"/>`;
+        break;
+      case "question":
+        g = `<circle cx="24" cy="24" r="19" ${line} stroke-width="4"/><path d="M18 18.5 C18 14.5 21 12 24.5 12 C28 12 31 14.5 31 18 C31 21.5 28.5 23 26.5 24 C25 25 24.5 26 24.5 28.5" ${line} stroke-width="4"/><circle cx="24.5" cy="35" r="2.8" fill="${color}"/>`;
+        break;
+      case "lock":
+        g = `<rect x="9" y="21" width="30" height="23" rx="4" fill="${color}"/><path d="M15 21 V15 C15 9.5 19 6 24 6 C29 6 33 9.5 33 15 V21" ${line} stroke-width="4.5"/>`;
+        break;
+      case "unlock":
+        g = `<rect x="9" y="21" width="30" height="23" rx="4" fill="${color}"/><path d="M15 21 V15 C15 9.5 19 6 24 6 C28.5 6 32 8.5 33 13" ${line} stroke-width="4.5"/>`;
+        break;
+      case "pin":
+        g = `<path d="M24 44 C24 44 9 29 9 18.5 C9 10 15.5 4 24 4 C32.5 4 39 10 39 18.5 C39 29 24 44 24 44 Z" ${line} stroke-width="4"/><circle cx="24" cy="18.5" r="5.5" fill="${color}"/>`;
+        break;
+      case "circle":
+        g = `<circle cx="24" cy="24" r="17" fill="${color}"/>`;
+        break;
+      case "square":
+        g = `<rect x="8" y="8" width="32" height="32" rx="6" fill="${color}"/>`;
+        break;
+      case "triangle":
+        g = `<path d="M24 7 L42 39 H6 Z" ${fill} stroke-width="3"/>`;
+        break;
+      case "diamond":
+        g = `<path d="M24 5 L43 24 L24 43 L5 24 Z" ${fill} stroke-width="3"/>`;
         break;
       case "none":
         g = `<path d="M14 24 H34" ${line} stroke-width="5"/>`;
@@ -569,13 +743,24 @@
       + `<rect width="144" height="144" fill="${C.off}"/>${band(m)}${content}${frame}</svg>`;
   }
 
-  // Pictos proposés pour l'apparence de la touche « Action OBS », dans l'ordre de la fenêtre de réglages.
-  const PICKS = ["scene", "monitor", "camera", "webcam", "person", "duo", "gamepad", "chat", "mic", "micoff", "headset",
-    "speaker", "speakeroff", "music", "picture", "photo", "film", "pencil", "code", "coffee", "clock", "moon", "home",
-    "phone", "star", "heart", "fire", "bolt", "sparkle", "bulb", "bell", "trophy", "flag", "check", "arrow", "live",
-    "rec", "pause", "play", "stop", "power", "eye", "eyeoff", "filter"];
+  // Pictos proposés pour l'apparence de la touche « Action OBS », par groupe, dans l'ordre de la fenêtre de réglages.
+  const PICK_GROUPS = [
+    ["Flèches", ["left", "arrow", "up", "down", "upleft", "upright", "downleft", "downright", "leftright", "updown",
+      "prev", "next", "back", "refresh", "swap", "expand"]],
+    ["Scènes et écrans", ["scene", "monitor", "laptop", "window", "split", "pip", "grid", "camera", "webcam", "photo",
+      "picture", "film", "zoom", "cursor", "keyboard", "mouse", "phone", "code", "pencil"]],
+    ["Moments du live", ["hourglass", "coffee", "food", "moon", "sun", "clock", "calendar", "home", "flag", "megaphone",
+      "bell", "gift", "crown", "rocket", "trophy"]],
+    ["Personnes", ["person", "duo", "group", "smile", "chat", "heart"]],
+    ["Jeu", ["gamepad", "target", "sword", "shield", "skull", "dice", "star", "fire", "bolt", "sparkle", "bulb"]],
+    ["Son", ["mic", "micoff", "headset", "speaker", "speakeroff", "music"]],
+    ["Symboles", ["check", "close", "plus", "minus", "info", "warning", "question", "lock", "unlock", "pin", "circle",
+      "square", "triangle", "diamond"]],
+    ["Commandes", ["live", "rec", "pause", "play", "stop", "power", "eye", "eyeoff", "filter", "exit"]],
+  ];
+  const PICKS = PICK_GROUPS.flatMap(([, names]) => names);
 
-  const api = { render, glyph, formatTime, COLORS: C, PICKS };
+  const api = { render, glyph, formatTime, COLORS: C, PICKS, PICK_GROUPS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.MultiObsKeys = api;
 })(this);

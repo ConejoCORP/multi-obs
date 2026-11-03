@@ -115,7 +115,7 @@ En haut de chaque touche, l'OBS qu'elle pilote : sa couleur et son nom, ou **TOU
 
 Pendant un appui long, un cercle blanc grandit jusqu'à couvrir la touche, et l'action part quand il la remplit. Les touches suivent OBS en direct : une scène passée à l'antenne, une source cachée ou un son coupé depuis OBS se voient aussi sur le Stream Deck.
 
-Une **Action OBS** peut prendre ton apparence (réglages de la touche → **Apparence → Personnaliser**) : une **image** (une photo remplit la touche, un logo transparent est posé sur sa couleur), un **texte** à toi (emojis compris) ou l'un des 44 **pictos**, ou seulement l'un des deux en plus grand. Les couleurs d'état restent : une scène à l'antenne encadre l'image en vert, une source cachée la voile.
+Une **Action OBS** peut prendre ton apparence (réglages de la touche → **Apparence → Personnaliser**) : une **image** (une photo remplit la touche, un logo transparent est posé sur sa couleur), un **texte** à toi (emojis compris) ou l'un des 97 **pictos** (flèches dans tous les sens, écrans, moments du live, jeu, symboles…), ou seulement l'un des deux en plus grand. Les couleurs d'état restent : une scène à l'antenne encadre l'image en vert, une source cachée la voile.
 
 « Tous » fait comme les boutons du haut de Multi OBS : allumer / éteindre toutes les instances, enregistrer et mettre en pause les instances liées (**Link**). Si Multi OBS est fermé, un appui sur une touche l'ouvre. En cas de problème grave, les touches passent en alerte (voir [Alertes](#alertes)).
 
