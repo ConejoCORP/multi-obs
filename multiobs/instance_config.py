@@ -30,6 +30,7 @@ class InstanceDef:
     rec_type: str = "cam"               # clé du type (cam, ecran, live… ou perso), utilisée dans le nom des fichiers
     preview_hidden: bool = False        # aperçu masqué sur la carte (aucune ressource utilisée)
     card_minimized: bool = False        # carte rangée dans la barre « Instances réduites » en bas
+    chat_platform: str = ""             # bouton Chat (OBS du live) : twitch / youtube / multi ("" : par défaut)
 
     @property
     def dir(self) -> Path:

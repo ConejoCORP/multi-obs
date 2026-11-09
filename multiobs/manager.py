@@ -34,6 +34,13 @@ DEFAULT_SETTINGS = {
     "current_preset": "",
     "creator": "",
     "twitch_channel": "",             # lien de la chaîne Twitch : bouton « Chat Twitch » sur l'OBS du live
+    "youtube_channel": "",            # lien de la chaîne YouTube (ou @pseudo) : chat YouTube et multi-chat
+    "chat_platform": "twitch",        # chat des OBS du live sans choix à eux (chacun choisit avec la flèche de son bouton)
+    "chat_native_single": False,      # Twitch / YouTube seul : vrai chat du site au lieu de la fenêtre du chat
+    "chat_feed": True,                # fenêtre du chat : fil d'actualité en bas (abonnements, raids, bits…)
+    "chat_feed_pct": 20,              # … sur 20 % de la hauteur ; chat_feed_events : ce qu'il montre (absent : tout)
+    "chat_font_pt": 11,               # fenêtre du chat : taille du texte, toujours devant, place de la fenêtre
+    "chat_on_top": False,             # chat_geometries : place de la fenêtre du chat de chaque instance
     "creator_in_name": True,          # décoché : les fichiers n'ont pas ton nom (enregistrements solo)
     "video_name": "",
     "filename_template": naming.DEFAULT_TEMPLATE,

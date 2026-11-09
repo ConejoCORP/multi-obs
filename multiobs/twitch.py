@@ -2,7 +2,7 @@
 
 Le lien de la chaîne est dans les paramètres. Le chat s'ouvre dans une fenêtre « appli » de Chrome ou d'Edge
 (sans onglets ni barre d'adresse, avec le compte Twitch déjà connecté dans le navigateur), sinon dans le
-navigateur par défaut.
+navigateur par défaut. Le chat YouTube et le multi-chat sont dans livechat.py et ui/chatwindow.py.
 """
 import re
 import subprocess
@@ -28,6 +28,11 @@ def chat_url(name: str) -> str:
     return f"https://www.twitch.tv/popout/{name}/chat?popout=&darkpopout"   # chat en thème sombre
 
 
+def activity_feed_url(name: str) -> str:
+    """Flux d'activité officiel de la chaîne (follows compris) : il faut être connecté à ce compte Twitch."""
+    return f"https://dashboard.twitch.tv/popout/u/{name}/stream-manager/activity-feed"
+
+
 def is_live_instance(inst) -> bool:
     """Le bouton du chat est sur l'OBS du live : type « live » ou « live » dans le nom."""
     return inst.rec_type == "live" or "live" in inst.name.lower()
@@ -50,9 +55,12 @@ def _app_browser() -> str | None:
 def open_chat(link: str) -> bool:
     """Ouvre le chat de la chaîne dans une fenêtre à part. False si le lien n'est pas une chaîne Twitch."""
     name = channel(link)
-    if not name:
-        return False
-    url = chat_url(name)
+    return bool(name) and open_window(chat_url(name))
+
+
+def open_window(url: str) -> bool:
+    """Ouvre une page (chat Twitch ou YouTube) dans une fenêtre « appli » de Chrome ou d'Edge, sinon dans le
+    navigateur par défaut."""
     exe = _app_browser()
     if exe:
         try:

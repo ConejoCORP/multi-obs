@@ -192,6 +192,11 @@ QTabBar::tab {{ background: {y['grey6']}; color: {y['white4']}; border: 1px soli
 QTabBar::tab:selected {{ background: {y['blue3']}; border-color: {y['blue2']}; color: {y['white1']}; }}
 QTabBar::tab:hover:!selected {{ background: {y['grey4']}; color: {y['white1']}; }}
 QFrame#instanceCard QPushButton {{ padding: 5px 8px; }}
+QToolButton#chatButton {{ padding: 5px 8px; padding-right: 24px; }}
+QToolButton#chatButton::menu-button {{ border: none; border-left: 1px solid {y['grey3']}; width: 18px;
+    border-top-right-radius: 4px; border-bottom-right-radius: 4px; }}
+QToolButton#chatButton::menu-button:hover {{ background: {y['grey2']}; }}
+QToolButton#chatButton::menu-arrow {{ image: url({ic}/down.svg); width: 9px; height: 9px; }}
 QToolButton#flatIcon {{ background: transparent; border: none; padding: 3px; }}
 QToolButton#flatIcon:hover {{ background: rgba(255, 255, 255, 0.08); border-radius: 4px; }}
 QToolButton#linkToggle {{ background: transparent; border: none; padding: 3px 4px; color: {y['white5']}; font-weight: 600; }}

@@ -55,7 +55,8 @@ class InstanceCard(QFrame):
         self.ctrl = ctrl
         self.filename_preview = None   # fourni par la fenêtre principale
         self.before_record = None      # idem : demande le nom de la vidéo puis lance le rec (option)
-        self.open_chat = None          # idem : ouvre le chat Twitch (OBS du live)
+        self.open_chat = None          # idem : open_chat(id) ouvre le chat de cette instance (OBS du live)
+        self.fill_chat_menu = None     # idem : fill_chat_menu(menu, id), menu du bouton Chat (flèche, clic droit)
         self.vcam_name = vcam_name     # « VCam Rouge » : nom de la caméra virtuelle dans Windows
         self.setObjectName("instanceCard")
         self.setMinimumWidth(420)
@@ -151,14 +152,23 @@ class InstanceCard(QFrame):
         self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.folder_btn.setToolTip("Ouvrir le dossier des enregistrements de cette instance")
         self.folder_btn.clicked.connect(self._open_record_folder)
-        # OBS du live : chat Twitch dans une fenêtre à part, en un clic (chaîne dans les paramètres).
-        self.chat_btn = QToolButton(objectName="flatIcon")
-        self.chat_btn.setIcon(icon("twitch.svg"))
-        self.chat_btn.setIconSize(QSize(18, 18))
+        # OBS du live : bouton « Chat » (logo du chat choisi) ; le clic ouvre le chat Twitch, YouTube ou le
+        # multi-chat dans une fenêtre à part, la flèche (ou le clic droit) le menu pour choisir.
+        self.chat_btn = QToolButton(objectName="chatButton")
+        self.chat_btn.setText("Chat")
+        self.chat_btn.setIconSize(QSize(14, 14))
+        self.chat_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.chat_btn.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.chat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chat_btn.setToolTip("Ouvrir le chat Twitch de ta chaîne dans une fenêtre à part\n"
-                                 "(lien de la chaîne : Paramètres → Général)")
-        self.chat_btn.clicked.connect(lambda: self.open_chat and self.open_chat())
+        chat_menu = QMenu(self.chat_btn)
+        chat_menu.aboutToShow.connect(
+            lambda: self.fill_chat_menu and self.fill_chat_menu(chat_menu, self.ctrl.inst.id))
+        self.chat_btn.setMenu(chat_menu)
+        self.chat_btn.clicked.connect(lambda: self.open_chat and self.open_chat(self.ctrl.inst.id))
+        self.chat_btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.chat_btn.customContextMenuRequested.connect(lambda _pos: self.chat_btn.showMenu())
+        self._chat_platform = None
+        self.refresh_chat_button(self.chat_choice())
         # Link : l'instance suit les boutons du haut (Tout enregistrer / Tout en pause) et les raccourcis.
         self.include = QToolButton(objectName="linkToggle")
         self.include.setText("Link")
@@ -224,6 +234,23 @@ class InstanceCard(QFrame):
     def _link_toggled(self, linked: bool) -> None:
         self.include.setIcon(icon("link.svg" if linked else "link-off.svg"))
         self.includeChanged.emit(self.ctrl.inst.id, linked)
+
+    CHAT_BUTTONS = {"twitch": ("twitch.svg", "Ouvrir le chat Twitch de ta chaîne dans une fenêtre à part"),
+                    "youtube": ("youtube.svg", "Ouvrir le chat YouTube de ton live dans une fenêtre à part"),
+                    "multi": ("multichat.svg", "Ouvrir le multi-chat : Twitch et YouTube dans une seule fenêtre")}
+
+    def chat_choice(self) -> str:
+        """Chat de cette instance : le sien (menu du bouton), sinon celui par défaut."""
+        return self.ctrl.inst.chat_platform or (self.ctrl.settings or {}).get("chat_platform", "twitch")
+
+    def refresh_chat_button(self, platform: str) -> None:
+        """Logo du bouton du chat : celui du chat qu'il ouvre (Twitch, YouTube ou les deux)."""
+        if platform == self._chat_platform:
+            return
+        self._chat_platform = platform
+        name, tip = self.CHAT_BUTTONS.get(platform, self.CHAT_BUTTONS["twitch"])
+        self.chat_btn.setIcon(icon(name))
+        self.chat_btn.setToolTip(tip + "\nFlèche ou clic droit : choisir Twitch, YouTube ou le multi-chat, et tes chaînes")
 
     def _open_record_folder(self) -> None:
         if self.ctrl.connected:
@@ -337,7 +364,10 @@ class InstanceCard(QFrame):
         fps_setting = int(c.settings.get("preview_fps", 60)) if c.settings else 60
 
         self._set_chip(*_status_chip(c))
-        self.chat_btn.setVisible(twitch.is_live_instance(c.inst))   # suit le nom et le type de l'instance
+        live = twitch.is_live_instance(c.inst)   # suit le nom et le type de l'instance
+        self.chat_btn.setVisible(live)
+        if live:
+            self.refresh_chat_button(self.chat_choice())
         if status == "stopped":
             self.preview.placeholder = "Instance éteinte — double-clic pour l'allumer"
         elif status == "starting":

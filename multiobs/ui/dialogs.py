@@ -322,13 +322,23 @@ class SettingsDialog(QDialog):
         form.addRow(self.taskbar_rename)
         general.addWidget(g)
 
-        g = QGroupBox("Twitch")
+        g = QGroupBox("Chat du live")
         form = QFormLayout(g)
         self.twitch = QLineEdit(manager.settings.get("twitch_channel", ""))
         self.twitch.setPlaceholderText("https://www.twitch.tv/tachaine")
-        self.twitch.setToolTip("Le bouton « Chat Twitch » de l'OBS du live (type Live, ou « live » dans son nom) "
-                               "ouvre le chat de cette chaîne dans une fenêtre à part.")
-        form.addRow("Lien de ta chaîne", self.twitch)
+        self.twitch.setToolTip("Le chat de cette chaîne s'ouvre dans la fenêtre du chat, ou dans le multi-chat.")
+        form.addRow("Chaîne Twitch", self.twitch)
+        self.youtube = QLineEdit(manager.settings.get("youtube_channel", ""))
+        self.youtube.setPlaceholderText("https://www.youtube.com/@tachaine")
+        self.youtube.setToolTip("Lien de ta chaîne ou ton @pseudo : le chat de ton live en cours est trouvé tout seul.\n"
+                                "(Le lien d'un live précis marche aussi.)")
+        form.addRow("Chaîne YouTube", self.youtube)
+        note = QLabel("Chaque OBS du live (type Live, ou « live » dans son nom) a son bouton « Chat » : sa petite "
+                      "flèche (ou un clic droit) choisit son chat (Twitch, YouTube ou les deux) et ouvre sa propre "
+                      "fenêtre ; tout en bas, « Personnalisé… » règle le reste (fil d'actualité, taille du texte…).")
+        note.setProperty("muted", True)
+        note.setWordWrap(True)
+        form.addRow(note)
         general.addWidget(g)
 
         from .. import APP_VERSION
@@ -827,6 +837,7 @@ class SettingsDialog(QDialog):
         s["trash_mkv_after_remux"] = self.trash_mkv.isChecked()
         s["live_color"] = self.live_color.value
         s["twitch_channel"] = self.twitch.text().strip()
+        s["youtube_channel"] = self.youtube.text().strip()
         s["ask_video_name"] = self.ask_video_name.isChecked()
         s["sync_start"] = self.sync_start.isChecked()
         s["sync_stop"] = self.sync_stop.isChecked()

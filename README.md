@@ -32,7 +32,7 @@ Parce que deux OBS lancés normalement partagent le même dossier de configurati
 - 🚨 **Alertes immédiates** — rec bloqué, OBS fermé pendant le rec, erreur d'OBS, son qui décroche ou micro perdu, encodeur en panne, images perdues, disque presque plein : bandeau rouge, carte en rouge, bouton de la barre des tâches qui clignote, cadre rouge sur le Stream Deck ; tout se règle dans l'onglet **SafeGuard**
 - 🎛️ **Plugin Stream Deck** — des touches colorées pour chaque OBS ou pour tout Multi OBS : rec avec le timecode, pause, allumer / éteindre, scènes, sources, filtres, son, live… en appui court ou long, avec ton image, ton texte ou un picto ; installé en un clic
 - 👀 **Aperçu en direct sans compression**, vumètres audio, images perdues, CPU, et alertes (pas de son, disque presque plein, OBS qui attend une réponse) ; durée du rec (en rouge) et du live (en violet, ou la couleur de ton choix) sur l'aperçu
-- 💬 **Chat Twitch en un clic** — le logo Twitch sur la carte de l'OBS du live : le chat de ta chaîne, en sombre, dans une fenêtre à part
+- 💬 **Chat du live en un clic** — le bouton **Chat** de l'OBS du live ouvre ton chat Twitch, YouTube ou les deux réunis (un logo devant chaque message), avec le **fil d'actualité** en bas : abonnements, raids, bits, Super Chats, membres…
 - 🗂️ **Instances réduites** — le bouton **œil barré** range une instance dont tu ne te sers pas (l'OBS du live…) dans une barre en bas, avec son état ; **Remettre** la ramène parmi les autres
 - 🎥 **Une caméra virtuelle par instance**, au nom de sa couleur — « VCam Rouge », « VCam Bleu »… pour Discord, Zoom ou une autre instance, sans droits administrateur
 - 🏷️ **Nommage automatique** — `Nom-type-Vidéo-date_heure`, avec tes propres types (Cam, Écran et Live par défaut)
@@ -92,6 +92,21 @@ Quand une caméra virtuelle est éteinte, son image d'attente prend la couleur d
 <div align="center">
 <img src="screenshots/06_vcam.png" width="760" alt="Images d'attente des caméras virtuelles, une par couleur">
 </div>
+
+## Chat du live
+
+Sur la carte de l'OBS du live (type **Live**, ou « live » dans son nom), le bouton **Chat** ouvre ton chat. Sa **petite flèche** (ou un clic droit) permet de choisir lequel :
+
+- **Chat Twitch** ou **Chat YouTube** — pour YouTube, Multi OBS trouve tout seul ton live en cours sur ta chaîne ;
+- **Multi-chat : Twitch + YouTube** — les deux réunis, un logo Twitch ou YouTube devant chaque message pour savoir d'où vient la personne.
+
+Le choix est propre à chaque OBS du live, et chacun a sa fenêtre : par exemple le chat Twitch pour l'OBS du live Twitch et le chat YouTube pour celui du live YouTube, ouverts côte à côte (chaque fenêtre retrouve sa place).
+
+Le chat s'ouvre dans une fenêtre de Multi OBS : le chat en haut, le **fil d'actualité** en bas (20 % de la hauteur, à régler à la souris ; la cloche l'affiche ou le cache) avec les abonnements et abonnements offerts, raids, bits, Super Chats et Super Stickers, nouveaux membres YouTube, annonces et récompenses des points de chaîne. Emotes affichées, Super Chats, abonnements et raids mis en avant dans le chat, messages supprimés par les modos grisés, taille du texte et « Toujours devant » en haut. La fenêtre se lit seulement : ses boutons **Chat Twitch** / **Chat YouTube** ouvrent le vrai chat quand tu veux écrire. Lancée avant ton live YouTube, elle l'attend et s'y branche toute seule.
+
+Les follows Twitch et les nouveaux abonnés YouTube ne passent pas par le chat : **Flux Twitch complet**, en haut du fil, ouvre le flux d'activité de Twitch (follows compris), avec ton compte connecté dans Chrome ou Edge.
+
+Tout en bas du menu, **Personnalisé…** règle tout : ce que le bouton de cette instance ouvre, tes chaînes (le lien de ta chaîne Twitch ; pour YouTube le lien de ta chaîne ou ton `@pseudo`), le fil d'actualité (affiché ou non, sa hauteur, ce qu'il montre), la taille du texte, « Toujours devant », et au choix le vrai chat du site pour Twitch ou YouTube seul. Le chat est lu comme le ferait un visiteur : pas de compte à connecter, pas de clé à créer.
 
 ## Stream Deck
 
@@ -213,4 +228,4 @@ Logiciel libre sous licence [GNU GPL version 2 ou (à ton choix) toute version u
 
 ---
 
-Multi OBS est un projet indépendant, non affilié à l'OBS Project. Il pilote ton installation d'[OBS Studio](https://github.com/obsproject/obs-studio) sans la modifier ; les icônes de l'interface et le logo OBS proviennent d'OBS Studio (GPL-2.0).
+Multi OBS est un projet indépendant, non affilié à l'OBS Project. Il pilote ton installation d'[OBS Studio](https://github.com/obsproject/obs-studio) sans la modifier ; les icônes de l'interface et le logo OBS proviennent d'OBS Studio (GPL-2.0). La fenêtre du chat utilise la police [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1, voir `multiobs/assets/fonts/Inter-LICENSE.txt`), celle du chat de Twitch. Multi OBS n'est affilié ni à Twitch ni à YouTube.

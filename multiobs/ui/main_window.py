@@ -4,10 +4,10 @@ import time
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
-                               QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
+                               QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, APP_VERSION, applog, obsfiles, paths, twitch, vcam, winapi
+from .. import APP_NAME, APP_VERSION, applog, livechat, obsfiles, paths, twitch, vcam, winapi
 from ..controller import RESUME_GUARD_S
 from ..framesync import OP_NAMES, FrameSync
 from ..hotkeys import GlobalHotkeys
@@ -16,6 +16,7 @@ from ..preview import STATE_ACTIVE, STATE_AWAY, STATE_BACKGROUND
 from ..remote import RemoteServer
 from ..syswatch import SystemEvents
 from .card import InstanceCard, MiniChip
+from .chatwindow import CHAT_MODES, ChatSettingsDialog, ChatWindow, LiveFinder
 from .deck_status import DeckStatus
 from .dialogs import InstanceDialog, SettingsDialog, VideoNameDialog, ask_conversions
 from .tasks import Task, run_task
@@ -40,6 +41,8 @@ class MainWindow(QMainWindow):
         self.mini_chips: dict[str, MiniChip] = {}
         self._columns = 0
         self._compact = False
+        self._chat_windows: dict[str, ChatWindow] = {}   # fenêtre du chat de chaque instance du live
+        self._live_finder: LiveFinder | None = None      # recherche du live YouTube en cours
         self.setWindowTitle(APP_NAME)
         self.resize(1320, 900)
         self.setMinimumSize(900, 520)
@@ -305,6 +308,8 @@ class MainWindow(QMainWindow):
         for inst_id in list(self.cards):
             card = self.cards[inst_id]
             if inst_id not in ids or card.ctrl is not self.manager.controllers.get(inst_id):
+                if inst_id not in ids and inst_id in self._chat_windows:   # instance supprimée : son chat aussi
+                    self._chat_windows[inst_id].close()
                 card.setParent(None)
                 card.deleteLater()
                 del self.cards[inst_id]
@@ -322,14 +327,17 @@ class MainWindow(QMainWindow):
                 card.recTypeChanged.connect(self.manager.set_rec_type)
                 card.previewHiddenChanged.connect(self._set_preview_hidden)
                 card.minimizeRequested.connect(lambda i: self._set_card_minimized(i, True))
-                card.filename_preview = (lambda i=inst.id: self.manager.filename_preview(
-                    next(x for x in self.manager.instances if x.id == i)))
+                card.filename_preview = (lambda i=inst.id: self.manager.filename_preview(self._inst(i))
+                                         if self._inst(i) else "")   # instance supprimée : rien
                 card.before_record = self.ask_video_name_then
-                card.open_chat = self.open_twitch_chat
+                card.open_chat = self.open_live_chat
+                card.fill_chat_menu = self.fill_chat_menu
                 self.cards[inst.id] = card
             else:
                 self.cards[inst.id].vcam_name = names.get(inst.vcam, "")
                 self.cards[inst.id].apply_definition()
+            if inst.id in self._chat_windows:   # nom de l'instance changé : titre de sa fenêtre du chat
+                self._chat_windows[inst.id].set_name(inst.name)
         self._columns = 0
         self._relayout()
         self._refresh_mini_bar()
@@ -585,23 +593,174 @@ class MainWindow(QMainWindow):
             self._sync_busy, self._sync_started, self._sync_op = True, time.monotonic(), "align"
             self.framesync.align([self._sync_target(c) for c in aligned])
 
+    # ------------------------------------------------------------------ chat du live
+    def _inst(self, inst_id: str):
+        return next((i for i in self.manager.instances if i.id == inst_id), None)
+
+    def chat_mode(self, inst) -> str:
+        """Chat d'une instance du live : le sien (menu du bouton Chat), sinon celui par défaut."""
+        return (inst.chat_platform if inst else "") or self.manager.settings.get("chat_platform", "twitch")
+
+    def open_live_chat(self, inst_id: str, platform: str | None = None) -> None:
+        """Bouton « Chat » d'une instance du live : son chat Twitch, YouTube ou les deux, dans sa fenêtre du chat
+        (fil d'actualité en bas) ; ou le vrai chat du site pour Twitch / YouTube seul, si c'est réglé ainsi."""
+        inst = self._inst(inst_id)
+        if inst is None:
+            return
+        platform = platform or self.chat_mode(inst)
+        native = self.manager.settings.get("chat_native_single", False)
+        if platform == "youtube" and native:
+            self.open_youtube_chat()
+        elif platform == "twitch" and native:
+            self.open_twitch_chat()
+        else:
+            self.open_chat_window(inst, ["twitch", "youtube"] if platform == "multi" else [platform])
+
+    def fill_chat_menu(self, menu: QMenu, inst_id: str) -> None:
+        """Menu du bouton « Chat » d'une instance (flèche ou clic droit) : ce qu'il ouvre (propre à
+        l'instance), les chaînes, et tout en bas « Personnalisé… » pour tout régler."""
+        current = self.chat_mode(self._inst(inst_id))
+        menu.clear()
+        for key, label, name in CHAT_MODES:
+            # Avec un logo, Qt ne dessine pas la coche : chat actuel en gras avec « ✓ » à droite.
+            action = menu.addAction(icon(name), label + ("\t✓" if key == current else ""))
+            if key == current:
+                font = action.font()
+                font.setBold(True)
+                action.setFont(font)
+            action.triggered.connect(lambda _=False, k=key: self._choose_chat(inst_id, k))
+        menu.addSeparator()
+        menu.addAction("Chaîne Twitch…", lambda: self._edit_chat_link("twitch"))
+        menu.addAction("Chaîne YouTube…", lambda: self._edit_chat_link("youtube"))
+        menu.addSeparator()
+        menu.addAction(icon("cogs.svg"), "Personnalisé…", lambda: self.open_chat_settings(inst_id))
+
+    def _set_chat_mode(self, inst, platform: str) -> None:
+        inst.chat_platform = platform
+        self.manager.save()
+        card = self.cards.get(inst.id)
+        if card is not None:
+            card.refresh_chat_button(platform)
+
+    def _choose_chat(self, inst_id: str, platform: str) -> None:
+        """Choix du menu : devient le chat du bouton de cette instance, et s'ouvre tout de suite."""
+        inst = self._inst(inst_id)
+        if inst is not None:
+            self._set_chat_mode(inst, platform)
+            self.open_live_chat(inst_id, platform)
+
+    def _edit_chat_link(self, platform: str) -> None:
+        if self.ask_chat_link(platform, force=True):
+            for win in list(self._chat_windows.values()):
+                win.start_readers(platform)
+
+    def open_chat_settings(self, inst_id: str) -> None:
+        """« Chat personnalisé » : le chat de cette instance (Twitch / YouTube / mixte), et pour toutes les
+        fenêtres du chat les chaînes, le fil d'actualité et le texte ; les fenêtres ouvertes suivent."""
+        inst = self._inst(inst_id)
+        if inst is None:
+            return
+        s = self.manager.settings
+        before = (s.get("twitch_channel", ""), s.get("youtube_channel", ""))
+        win = self._chat_windows.get(inst_id)
+        dlg = ChatSettingsDialog(s, win if win is not None else self, self.chat_mode(inst), inst.name)
+        if not dlg.exec():
+            return
+        self._set_chat_mode(inst, dlg.mode.currentData())
+        for w in list(self._chat_windows.values()):
+            w.apply_settings()
+            for platform, link in zip(("twitch", "youtube"), before):
+                if s.get(f"{platform}_channel", "") != link:
+                    w.start_readers(platform)
+
+    def ask_chat_link(self, platform: str, force: bool = False, parent=None) -> str | None:
+        """Lien de la chaîne Twitch / YouTube ; demandé (et gardé) s'il manque, ou toujours avec force."""
+        s = self.manager.settings
+        if platform == "twitch":
+            key, valid, title = "twitch_channel", twitch.channel, "Chat Twitch"
+            prompt, example = "Lien de ta chaîne Twitch (ou son nom) :", "https://www.twitch.tv/tachaine"
+        else:
+            key, valid, title = "youtube_channel", livechat.youtube_target, "Chat YouTube"
+            prompt, example = "Lien de ta chaîne YouTube (ou ton @pseudo) :", "https://www.youtube.com/@tachaine"
+        link = s.get(key, "")
+        if valid(link) and not force:
+            return link
+        text, ok = QInputDialog.getText(parent or self, title, prompt, QLineEdit.EchoMode.Normal, link)
+        if not ok:
+            return None
+        if not valid(text):
+            QMessageBox.warning(parent or self, APP_NAME, f"Ce n'est pas un lien de chaîne {title[5:]}.\n"
+                                f"Exemple : {example}")
+            return None
+        s[key] = text.strip()
+        self.manager.save()
+        return s[key]
+
     def open_twitch_chat(self) -> None:
-        """Bouton « Chat Twitch » de l'OBS du live : la première fois, demande le lien de la chaîne (gardé)."""
-        link = self.manager.settings.get("twitch_channel", "")
-        if not twitch.channel(link):
-            text, ok = QInputDialog.getText(self, "Chat Twitch", "Lien de ta chaîne Twitch (ou son nom) :",
-                                            QLineEdit.EchoMode.Normal, link)
-            if not ok:
-                return
-            if not twitch.channel(text):
-                QMessageBox.warning(self, APP_NAME, "Ce n'est pas un lien de chaîne Twitch.\n"
-                                    "Exemple : https://www.twitch.tv/tachaine")
-                return
-            link = text.strip()
-            self.manager.settings["twitch_channel"] = link
-            self.manager.save()
-        if not twitch.open_chat(link):
+        """Vrai chat Twitch de la chaîne dans une fenêtre à part : la première fois, demande le lien (gardé)."""
+        link = self.ask_chat_link("twitch")
+        if link and not twitch.open_chat(link):
             QMessageBox.warning(self, APP_NAME, "Impossible d'ouvrir le chat Twitch.")
+
+    def open_youtube_chat(self, video_id: str = "") -> None:
+        """Vrai chat YouTube du live en cours dans une fenêtre à part (le live est cherché sur la chaîne)."""
+        if video_id:
+            twitch.open_window(livechat.youtube_chat_url(video_id))
+            return
+        link = self.ask_chat_link("youtube")
+        if not link or self._live_finder is not None:
+            return
+        self.statusBar().showMessage("Recherche de ton live YouTube…", 15000)
+        finder = self._live_finder = LiveFinder(self)
+
+        def done(result) -> None:
+            self._live_finder = None
+            finder.deleteLater()
+            self.statusBar().clearMessage()
+            vid, why = result
+            if not vid:
+                QMessageBox.information(self, APP_NAME, why)
+            elif not twitch.open_window(livechat.youtube_chat_url(vid)):
+                QMessageBox.warning(self, APP_NAME, "Impossible d'ouvrir le chat YouTube.")
+        finder.done.connect(done)
+        finder.start(link)
+
+    def open_chat_window(self, inst, platforms: list) -> None:
+        """Fenêtre du chat d'une instance du live : un chat ou les deux réunis (un logo devant chaque message),
+        le fil d'actualité en bas. Une fenêtre par instance : une pour Twitch, une autre pour YouTube…"""
+        win = self._chat_windows.get(inst.id)
+        if win is not None and win.platforms == [p for p in ("twitch", "youtube") if p in platforms]:
+            if win.isMinimized():
+                win.showNormal()
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            return
+        if win is not None:   # autre chat choisi pour cette instance : sa fenêtre est remplacée
+            win.close()
+        for platform in platforms:   # chaîne manquante : demandée une fois (on peut passer)
+            self.ask_chat_link(platform)
+        win = ChatWindow(self.manager.settings, platforms, self._open_native_chat,
+                         lambda p, i=inst.id: self.ask_chat_link(p, True, self._chat_windows.get(i)),
+                         self.manager.save, inst.id, inst.name)
+        self._chat_windows[inst.id] = win
+        win.closed.connect(lambda w=win, i=inst.id: self._chat_window_closed(i, w))
+        win.show()
+
+    def _chat_window_closed(self, inst_id: str, win) -> None:
+        if self._chat_windows.get(inst_id) is win:
+            del self._chat_windows[inst_id]
+
+    def _open_native_chat(self, target: str, video_id: str = "") -> None:
+        """Boutons de la fenêtre du chat : le vrai chat pour écrire, ou le flux d'activité de Twitch."""
+        if target == "twitch":
+            self.open_twitch_chat()
+        elif target == "twitch-feed":
+            link = self.ask_chat_link("twitch")
+            if link and not twitch.open_window(twitch.activity_feed_url(twitch.channel(link))):
+                QMessageBox.warning(self, APP_NAME, "Impossible d'ouvrir le flux d'activité de Twitch.")
+        else:
+            self.open_youtube_chat(video_id)
 
     def ask_video_name_then(self, start) -> bool:
         """Option « Demander le nom de la vidéo à chaque lancement de rec » : quand rien n'enregistre encore
@@ -876,6 +1035,8 @@ class MainWindow(QMainWindow):
     # Paramètres, raccourcis, barre d'état
     # ------------------------------------------------------------------ #
     def open_settings(self) -> None:
+        s = self.manager.settings
+        links = (s.get("twitch_channel", ""), s.get("youtube_channel", ""))
         dlg = SettingsDialog(self.manager, self, self)
         dlg.hotkeysChanged.connect(self.apply_hotkeys)
         dlg.exec()
@@ -883,6 +1044,11 @@ class MainWindow(QMainWindow):
             card.reload_types()
             card.refresh()
         self.refresh_status()
+        for win in list(self._chat_windows.values()):   # chaîne changée : les fenêtres du chat suivent
+            for platform, before, key in (("twitch", links[0], "twitch_channel"),
+                                          ("youtube", links[1], "youtube_channel")):
+                if s.get(key, "") != before:
+                    win.start_readers(platform)
 
     def apply_hotkeys(self) -> None:
         s = self.manager.settings
@@ -1045,6 +1211,8 @@ class MainWindow(QMainWindow):
                     self._quit_when_off()
                     return
         self.hotkeys.clear()
+        for win in list(self._chat_windows.values()):
+            win.close()
         if self.remote is not None:
             self.remote.stop()
         self.framesync.shutdown()

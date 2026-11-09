@@ -3,6 +3,30 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.9
+
+- **Chat du live : Twitch, YouTube ou les deux réunis, avec le fil d'actualité.** Sur la carte de l'OBS du
+  live, le logo Twitch devient un vrai bouton **Chat** : un clic ouvre le chat, sa petite flèche (ou un clic
+  droit) permet de choisir :
+  - **Chat Twitch**, **Chat YouTube** (Multi OBS trouve tout seul ton live en cours sur ta chaîne) ou le
+    **multi-chat**, les deux réunis avec un logo Twitch ou YouTube devant chaque message pour savoir d'où
+    vient la personne.
+  - **Chaque OBS du live a son chat**, dans sa propre fenêtre : par exemple le chat Twitch pour l'OBS du
+    live Twitch et le chat YouTube pour celui du live YouTube, ouverts côte à côte, chacun à sa place.
+  - Le chat s'ouvre dans une fenêtre de Multi OBS : le chat en haut, le **fil d'actualité** en bas (20 % de
+    la hauteur, à régler à la souris) avec les abonnements et abonnements offerts, raids, bits, Super Chats
+    et Super Stickers, nouveaux membres YouTube, annonces et récompenses des points de chaîne, à l'heure près.
+    Dans la police du chat de Twitch (Inter), pseudos en couleur et en gras, emotes affichées, Super Chats,
+    abonnements et raids mis en avant dans le chat, messages supprimés par les modos grisés, taille du
+    texte, « Toujours devant ». La fenêtre se lit seulement : ses boutons ouvrent le vrai chat quand tu
+    veux écrire. Lancée avant ton live YouTube, elle l'attend et s'y branche.
+  - Les follows Twitch et les nouveaux abonnés YouTube ne passent pas par le chat : le bouton
+    **Flux Twitch complet** ouvre le flux d'activité de Twitch (follows compris), avec ton compte connecté
+    dans Chrome ou Edge.
+  - Tout en bas du menu, **Personnalisé…** règle tout : ce que le bouton de cette instance ouvre, tes chaînes, le fil
+    d'actualité (affiché ou non, sa hauteur, ce qu'il montre), la taille du texte, « Toujours devant », et
+    au choix le vrai chat du site pour Twitch ou YouTube seul (pour écrire, sans fil d'actualité).
+
 ## 1.1.8
 
 - **Stream Deck : 97 pictos au lieu de 44** pour l'apparence des touches « Action OBS », rangés par
