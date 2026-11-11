@@ -3,6 +3,22 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.10
+
+- **Caméras virtuelles : l'image d'attente s'affiche aussi quand l'instance est fermée.** Avant, dans
+  Discord (ou Zoom…), une « VCam » dont l'OBS était fermé chargeait à l'infini, ce qui pouvait bloquer la
+  vidéo de Discord. Elle montre maintenant son image d'attente, à la couleur de l'instance, comme
+  « OBS Virtual Camera » de ton OBS habituel.
+  - La cause : la caméra relit la taille d'image de son OBS dans un petit fichier, mais les instances
+    écrivaient celui de l'OBS habituel. Chaque instance écrit maintenant le sien, et Multi OBS le crée dès
+    son ouverture s'il manque. Si Discord était déjà ouvert, rechoisis la caméra une fois.
+  - Les instances n'écrasent plus la taille d'image de la caméra virtuelle de ton OBS habituel.
+- **Le logo de Multi OBS sur l'image d'attente** des caméras virtuelles, à la place de celui d'OBS (le fond
+  garde la couleur de l'instance). Elle est mise à jour dès l'ouverture de Multi OBS ; si Discord affiche
+  encore l'ancienne, relance Discord.
+- Le dépôt GitHub a déménagé : les liens et les mises à jour pointent maintenant vers
+  [ConejoCORP/multi-obs](https://github.com/ConejoCORP/multi-obs).
+
 ## 1.1.9
 
 - **Chat du live : Twitch, YouTube ou les deux réunis, avec le fil d'actualité.** Sur la carte de l'OBS du

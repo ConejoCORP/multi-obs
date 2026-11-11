@@ -1108,6 +1108,7 @@ class MainWindow(QMainWindow):
 
     def repair_vcams(self) -> None:
         self.refresh_status()   # « Caméras virtuelles : x/y » reste juste même sans réparation
+        self.manager.ensure_vcam_files()   # image d'attente quand l'instance est fermée
         if self.manager.settings.get("vcam_scope") != vcam.SCOPE_USER or obsfiles.runtime_signature() is None \
                 or getattr(self, "_vcam_task", None) is not None:
             return

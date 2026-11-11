@@ -4,6 +4,7 @@ On reproduit exactement l'enregistrement fait par l'installeur d'OBS, mais avec 
 CLSID et un nom par caméra, en pointant vers les modules patchés de data/vcam/N.
 """
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -136,6 +137,31 @@ def uninstall(indices: list[int]) -> None:
             regs = [n for n in indices if registered_scope(n) == scope]
             if regs:
                 _run_reg_import(_reg_file(regs, scope, remove=True), elevated=(scope == SCOPE_MACHINE))
+        for n in indices:
+            try:
+                resolution_file(n).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def resolution_file(n: int) -> Path:
+    return Path(os.environ.get("APPDATA") or Path.home()) / obsfiles.vcam_res_name(n)
+
+
+def ensure_resolution_file(n: int, cx: int, cy: int, interval: int) -> None:
+    """Sans ce fichier, la caméra n ne propose aucun format tant que son OBS est fermé : Discord charge
+    à l'infini au lieu d'afficher l'image d'attente. L'OBS de l'instance le réécrit à chaque démarrage
+    de sa caméra virtuelle ; on ne l'écrit que s'il manque."""
+    f = resolution_file(n)
+    try:
+        if re.fullmatch(r"\d+x\d+x\d+", f.read_text("ascii").strip()):
+            return
+    except (OSError, UnicodeDecodeError):
+        pass
+    try:
+        f.write_text(f"{cx}x{cy}x{interval}", "ascii")
+    except OSError:
+        pass
 
 
 def _inproc_path(hive, n: int) -> str | None:

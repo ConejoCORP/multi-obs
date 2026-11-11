@@ -54,6 +54,12 @@ def vcam_name(n: int) -> str:
     return f"OBS Virtual Camera {n}"
 
 
+def vcam_res_name(n: int) -> str:
+    """Fichier de %APPDATA% où l'OBS de la caméra n note sa taille et sa cadence, et où le module de la
+    caméra les relit quand cet OBS est fermé (« obs-virtualcam.txt » pour l'OBS habituel, 18 caractères)."""
+    return f"obs-vcam-mob{n:02d}.txt"
+
+
 def core_layout(root: Path) -> bool:
     """OBS 33 ou plus : modules officiels rangés dans core/."""
     return (root / CORE_WINDSHOW_REL).exists()
@@ -91,13 +97,17 @@ def _common_patches(data: bytes, n: int) -> bytes:
 
 
 def patch_windshow(data: bytes, n: int) -> bytes:
-    return _common_patches(data, n)
+    data = _common_patches(data, n)
+    # Taille et cadence notées au démarrage de la caméra virtuelle : dans le fichier de la caméra n, que son
+    # module relit quand l'OBS est fermé (sinon ce module ne propose aucun format et Discord charge à l'infini).
+    return _replace(data, b"obs-virtualcam.txt", vcam_res_name(n).encode("ascii"), "fichier de résolution",
+                    required=False)
 
 
 def patch_vcam_module(data: bytes, n: int) -> bytes:
     data = _common_patches(data, n)
-    # Fichier où le module mémorise la résolution (19 caractères).
-    data = _replace(data, _w("\\obs-virtualcam.txt"), _w(f"\\obs-vcam-mob{n:02d}.txt"),
+    # Fichier où le module relit la taille et la cadence de son OBS (19 caractères).
+    data = _replace(data, _w("\\obs-virtualcam.txt"), _w("\\" + vcam_res_name(n)),
                     "fichier de résolution", required=False)
     # Nom interne du filtre (on garde la longueur, le reste est rempli de zéros).
     old = _w("OBS Virtual Camera") + b"\x00\x00"
@@ -263,6 +273,18 @@ def build_tree(inst_dir: Path, vcam: int, progress: Progress) -> None:
                                         "utf-8")
     install_sync_plugin(inst_dir)
     progress(total, total, "Instance prête")
+
+
+def refresh_windshow(inst_dir: Path, vcam: int) -> None:
+    """Re-patche le win-dshow.dll d'une instance déjà construite quand le patch a changé (Multi OBS mis à jour)."""
+    rel = windshow_rel(paths.RUNTIME)
+    src, dst = paths.RUNTIME / rel, inst_dir / rel
+    try:
+        data = patch_windshow(src.read_bytes(), vcam)
+        if dst.exists() and dst.read_bytes() != data:
+            dst.write_bytes(data)
+    except (OSError, PatchError):
+        pass   # OBS ouvert (DLL chargée) : au prochain allumage
 
 
 def install_sync_plugin(inst_dir: Path) -> None:

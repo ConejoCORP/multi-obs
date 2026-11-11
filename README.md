@@ -6,7 +6,7 @@
 
 Plusieurs **OBS Studio** indépendants, pilotés depuis une seule fenêtre : ta caméra, ton écran et ton live enregistrés séparément, sans que les OBS se marchent dessus.
 
-[**⬇ Télécharger pour Windows**](https://github.com/StundZow/multi-obs/releases/latest/download/Multi-OBS-Setup.exe) · [Releases](https://github.com/StundZow/multi-obs/releases)
+[**⬇ Télécharger pour Windows**](https://github.com/ConejoCORP/multi-obs/releases/latest/download/Multi-OBS-Setup.exe) · [Releases](https://github.com/ConejoCORP/multi-obs/releases)
 
 <img src="screenshots/01_main.png" width="760" alt="Fenêtre principale de Multi OBS">
 
@@ -50,7 +50,7 @@ Parce que deux OBS lancés normalement partagent le même dossier de configurati
 
 ## Prise en main
 
-1. [Télécharge `Multi-OBS-Setup.exe`](https://github.com/StundZow/multi-obs/releases/latest/download/Multi-OBS-Setup.exe) et lance-le — pas besoin d'être administrateur. [OBS Studio](https://obsproject.com/) doit être installé.
+1. [Télécharge `Multi-OBS-Setup.exe`](https://github.com/ConejoCORP/multi-obs/releases/latest/download/Multi-OBS-Setup.exe) et lance-le — pas besoin d'être administrateur. [OBS Studio](https://obsproject.com/) doit être installé.
 2. Trois cases à cocher (menu Démarrer, bureau, lancer à la fin) et un dossier d'installation modifiable.
 3. **Nouvelle instance** : un nom, une couleur, un type. « Partir de mes scènes et réglages OBS actuels » copie ta config OBS — ton OBS habituel n'est pas modifié.
 4. **Voir OBS** pour régler les scènes de l'instance, puis pilote tout depuis Multi OBS : **Rec**, **Pause**, **VCam**, et les boutons du haut pour toutes les instances liées. Avec **Tout enregistrer**, Multi OBS cale les fichiers à l'image près pendant la première seconde (une courte pause) : attends 1 à 2 secondes avant de parler.
@@ -87,7 +87,7 @@ Sur le Stream Deck, les touches de l'OBS concerné et les touches **TOUS** prenn
 
 Chaque instance a sa propre caméra virtuelle, au nom de sa couleur (« VCam Rouge », « VCam Bleu »…), à côté de « OBS Virtual Camera » de ton OBS habituel. Pour partager ta webcam entre plusieurs instances, l'instance qui la capture allume sa **VCam**, et les autres ajoutent une source « Périphérique de capture vidéo » sur cette caméra. Une instance ne voit pas sa propre caméra virtuelle, ce qui évite les boucles. Si une caméra disparaît de Windows, Multi OBS la remet tout seul. L'image arrive dans l'autre instance environ une image plus tard (de 7 à 29 ms à 60 i/s selon le démarrage des OBS, mesuré en 1080p et en 4K) : bien en dessous de ce qui se remarque entre l'image et le son.
 
-Quand une caméra virtuelle est éteinte, son image d'attente prend la couleur de son instance :
+Quand une caméra virtuelle est éteinte — même quand son instance est fermée, ou que Multi OBS ne tourne pas — Discord, Zoom… affichent son image d'attente, à la couleur de son instance :
 
 <div align="center">
 <img src="screenshots/06_vcam.png" width="760" alt="Images d'attente des caméras virtuelles, une par couleur">

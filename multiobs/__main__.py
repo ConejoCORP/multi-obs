@@ -10,24 +10,28 @@ from PySide6.QtWidgets import QApplication, QCheckBox, QMessageBox
 from . import APP_NAME, APP_VERSION, theme
 
 
+def paint_logo(p: QPainter, x: float, y: float, size: float) -> None:
+    """Logo de Multi OBS : trois anneaux aux couleurs des instances sur un disque sombre, façon logo OBS."""
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(theme.YAMI["grey7"]))
+    p.drawEllipse(QRectF(x, y, size, size))
+    r = size * 0.22
+    w = max(1.5, size * 0.075)
+    centers = [(0.5, 0.30), (0.30, 0.64), (0.70, 0.64)]
+    for (cx, cy), key in zip(centers, ("red", "teal", "green")):
+        p.setPen(QPen(QColor(theme.accent(key, 1)), w))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QRectF(x + cx * size - r, y + cy * size - r, 2 * r, 2 * r))
+
+
 def app_icon() -> QIcon:
-    """Trois anneaux aux couleurs des instances, façon logo OBS."""
     ic = QIcon()
     for size in (16, 24, 32, 48, 64, 128, 256):
         pm = QPixmap(size, size)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(theme.YAMI["grey7"]))
-        p.drawEllipse(QRectF(0, 0, size, size))
-        r = size * 0.22
-        w = max(1.5, size * 0.075)
-        centers = [(0.5, 0.30), (0.30, 0.64), (0.70, 0.64)]
-        for (cx, cy), key in zip(centers, ("red", "teal", "green")):
-            p.setPen(QPen(QColor(theme.accent(key, 1)), w))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(cx * size - r, cy * size - r, 2 * r, 2 * r))
+        paint_logo(p, 0, 0, size)
         p.end()
         ic.addPixmap(pm)
     return ic

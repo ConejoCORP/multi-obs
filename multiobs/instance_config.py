@@ -152,6 +152,39 @@ def record_directory(inst: "InstanceDef") -> Path:
     return Path(value) if value else default
 
 
+# Cadences « courantes » d'OBS (Paramètres → Vidéo) qui ne sont pas des nombres entiers d'images/s.
+_FPS_COMMON = {"24 NTSC": (24000, 1001), "29.97": (30000, 1001), "59.94": (60000, 1001)}
+
+
+def _int(value) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def vcam_resolution(inst: "InstanceDef") -> tuple[int, int, int]:
+    """Ce qu'envoie la caméra virtuelle de l'instance, lu dans son profil actif : largeur, hauteur et
+    intervalle entre deux images en centaines de ns (le calcul de virtualcam.c d'OBS)."""
+    cfg = inst.config_dir
+    cx, cy, num, den = 1920, 1080, 30, 1
+    profile = Ini(cfg / "user.ini").get("Basic", "ProfileDir") or Ini(cfg / "global.ini").get("Basic", "ProfileDir")
+    if profile:
+        ini = Ini(cfg / "basic" / "profiles" / profile / "basic.ini")
+        cx = _int(ini.get("Video", "OutputCX")) or _int(ini.get("Video", "BaseCX")) or cx
+        cy = _int(ini.get("Video", "OutputCY")) or _int(ini.get("Video", "BaseCY")) or cy
+        kind = _int(ini.get("Video", "FPSType"))
+        if kind == 1:
+            num, den = _int(ini.get("Video", "FPSInt")) or num, 1
+        elif kind == 2:
+            num, den = _int(ini.get("Video", "FPSNum")) or num, _int(ini.get("Video", "FPSDen")) or den
+        else:
+            common = (ini.get("Video", "FPSCommon") or "30").strip()
+            m = re.match(r"\d+", common)
+            num, den = _FPS_COMMON.get(common, (int(m.group()) if m else num, 1))
+    return cx, cy, den * 10_000_000 // num
+
+
 def _nvenc_available(obs_bin: Path) -> bool:
     exe = obs_bin / "obs-nvenc-test.exe"
     if not exe.exists():

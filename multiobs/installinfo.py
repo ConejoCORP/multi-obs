@@ -69,7 +69,7 @@ def register(install_dir: Path, version: str) -> None:
             "InstallLocation": str(install_dir),
             "DisplayIcon": f"{exe},0",
             "UninstallString": f'"{exe}" --uninstall',
-            "URLInfoAbout": "https://github.com/StundZow/multi-obs",
+            "URLInfoAbout": "https://github.com/ConejoCORP/multi-obs",
         }
         for name, value in values.items():
             winreg.SetValueEx(k, name, 0, winreg.REG_SZ, value)

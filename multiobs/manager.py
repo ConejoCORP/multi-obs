@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import applog, naming, obsfiles, paths, theme, vcam, winapi
 from .controller import InstanceController
-from .instance_config import InstanceDef, copy_tree_tolerant, ensure_config
+from .instance_config import InstanceDef, copy_tree_tolerant, ensure_config, vcam_resolution
 
 BASE_PORT = 4461
 AUTOSAVE_SLUG = "_derniere_session"
@@ -297,15 +297,16 @@ class Manager(QObject):
         for inst in insts:
             if not obsfiles.tree_is_current(inst.dir, inst.vcam):
                 obsfiles.build_tree(inst.dir, inst.vcam, progress)
+            else:
+                obsfiles.refresh_windshow(inst.dir, inst.vcam)
             obsfiles.install_sync_plugin(inst.dir)
             ensure_config(inst, (import_from or {}).get(inst.id), self.filename_format(inst),
                           bool(self.settings.get("auto_remux", True)))
+        self.ensure_vcam_files(insts)
         colors = {i.vcam: i.color for i in insts}
         names = self.vcam_names()
         stale = sorted({i.vcam for i in insts if not vcam.up_to_date(i.vcam, names.get(i.vcam, ""))})
         missing = [n for n in stale if not vcam.is_registered(n)]
-        for inst in insts:
-            obsfiles.set_vcam_placeholder(inst.vcam, inst.color)
         if stale and self.settings.get("vcam_scope") == vcam.SCOPE_USER:
             progress(0, 0, "Installation des caméras virtuelles…")
             try:
@@ -318,6 +319,17 @@ class Manager(QObject):
                        + (f" (échec pour {failed})" if failed else ""))
             return failed
         return missing
+
+    def ensure_vcam_files(self, insts: list[InstanceDef] | None = None) -> None:
+        """Ce que la caméra virtuelle montre quand son instance est fermée : son image d'attente (à jour), et
+        la taille d'image notée pour son module — sinon la caméra ne propose aucun format et Discord charge
+        à l'infini au lieu d'afficher l'image d'attente."""
+        if self.settings.get("vcam_scope") == "none":   # caméras désinstallées dans les paramètres
+            return
+        for inst in self.instances if insts is None else insts:
+            obsfiles.set_vcam_placeholder(inst.vcam, inst.color)
+            if inst.config_dir.exists():
+                vcam.ensure_resolution_file(inst.vcam, *vcam_resolution(inst))
 
     def vcam_names(self) -> dict[int, str]:
         """{numéro de caméra: nom dans Windows} — « VCam Rouge », « VCam Bleu »…"""
