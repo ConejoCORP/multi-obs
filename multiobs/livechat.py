@@ -5,7 +5,8 @@
   1 Ko), puis son chat est lu comme le fait la fenêtre de chat de YouTube (page live_chat, puis requêtes
   get_live_chat toutes les ~2 s), sans compte ni clé d'API.
 Les lecteurs tournent dans des threads et appellent emit(…) avec un événement : ("status", plateforme, état,
-texte), ("live", "youtube", id de la vidéo), ("message", ChatMessage), ("delete", plateforme, id),
+texte), ("live", "youtube", id de la vidéo), ("room", "twitch", id de la chaîne, pseudo),
+("message", ChatMessage), ("delete", plateforme, id),
 ("delete_author", plateforme, auteur), ("clear", plateforme). Le multi-chat est en lecture seule : pour écrire,
 on ouvre le vrai chat de la plateforme.
 """
@@ -55,6 +56,18 @@ class ChatMessage:
     accent: str = ""              # couleur du message mis en avant
     system: bool = False          # label = phrase complète avec le pseudo (abonnement Twitch…)
     event: str = ""               # pour le fil d'actualité : une des clés de FEED_EVENTS ("" : simple message)
+    # Comme sur Twitch : badges [("subscriber", "12"), …] ; YouTube [("yt", "owner|moderator|verified|member",
+    # url de l'image, titre)].
+    badges: list = field(default_factory=list)
+    badge_info: dict = field(default_factory=dict)   # Twitch : vrais mois d'abonnement {"subscriber": "14"}
+    login: str = ""               # Twitch : pseudo en minuscules (affiché entre parenthèses s'il diffère)
+    reply: tuple = ()             # réponse : (pseudo du message d'origine, son texte)
+    room_id: str = ""             # Twitch : id de la chaîne (badges de la chaîne, emotes 7TV / BTTV / FFZ)
+    notice: str = ""              # Twitch : msg-id (sub, resub, raid, announcement, highlighted-message…)
+    announce: str = ""            # couleur d'une annonce Twitch : PRIMARY, BLUE, GREEN, ORANGE, PURPLE
+    bits: int = 0
+    first: bool = False           # premier message de cette personne sur la chaîne
+    reward: bool = False          # récompense de points de chaîne (avec message)
 
     def text(self) -> str:
         return "".join(p[1] if p[0] == "text" else p[2] for p in self.parts)
@@ -137,14 +150,67 @@ def _twitch_role(badges: str) -> str:
     return ""
 
 
+def _badge_list(tag: str) -> list:
+    """« subscriber/12,premium/1 » → [("subscriber", "12"), ("premium", "1")]."""
+    return [tuple(b.split("/", 1)) if "/" in b else (b, "") for b in (tag or "").split(",") if b]
+
+
 def _twitch_message(tags: dict, prefix: str, text: str) -> ChatMessage:
     login = (tags.get("login") or prefix.split("!", 1)[0]).lower()
     action = text.startswith("\x01ACTION ") and text.endswith("\x01")
     if action:
         text = text[8:-1]
-    return ChatMessage("twitch", tags.get("id") or f"tw-{time.monotonic_ns()}", tags.get("display-name") or login,
-                       login, tags.get("color", ""), _twitch_parts(text, tags.get("emotes", "")),
-                       _twitch_role(tags.get("badges", "")), action)
+    msg = ChatMessage("twitch", tags.get("id") or f"tw-{time.monotonic_ns()}", tags.get("display-name") or login,
+                      login, tags.get("color", ""), _twitch_parts(text, tags.get("emotes", "")),
+                      _twitch_role(tags.get("badges", "")), action)
+    msg.badges = _badge_list(tags.get("badges", ""))
+    msg.badge_info = dict(_badge_list(tags.get("badge-info", "")))
+    msg.login = login
+    msg.room_id = tags.get("room-id", "")
+    if tags.get("reply-parent-msg-id"):
+        parent_login = tags.get("reply-parent-user-login", "")
+        msg.reply = (tags.get("reply-parent-display-name") or parent_login, tags.get("reply-parent-msg-body", ""))
+        # Twitch met « @pseudo » au début d'une réponse et ne l'affiche pas (l'en-tête « En réponse à » le dit).
+        first = msg.parts[0] if msg.parts else None
+        if parent_login and first and first[0] == "text" and first[1].lower().startswith("@" + parent_login.lower()):
+            rest = first[1][len(parent_login) + 1:].lstrip(" ")
+            msg.parts = ([("text", rest)] if rest else []) + msg.parts[1:]
+    return msg
+
+
+def _notice_fr(kind: str, tags: dict, name: str) -> str:
+    """Phrase d'un abonnement, d'un don, d'un raid… en français, comme dans Twitch en français (le serveur du
+    chat les envoie en anglais) ; "" si ce type n'est pas connu (la phrase anglaise de Twitch est gardée)."""
+    plan = tags.get("msg-param-sub-plan", "")
+    level = "avec Prime" if plan.lower() == "prime" else f"au niveau {plan[0]}" if plan[:1] in "123" and plan else ""
+    tier = f"de niveau {plan[0]} " if plan[:1] in "123" and plan else ""
+    months = tags.get("msg-param-cumulative-months", "")
+    count = tags.get("msg-param-mass-gift-count", "")
+    if kind == "sub":
+        return f"{name} s'est abonné(e) {level}.".replace(" .", ".")
+    if kind == "resub":
+        since = f" Abonné(e) depuis {months} mois !" if months.isdigit() and int(months) > 1 else ""
+        return f"{name} s'est abonné(e) {level}.".replace(" .", ".") + since
+    if kind in ("subgift", "anonsubgift"):
+        to = tags.get("msg-param-recipient-display-name") or tags.get("msg-param-recipient-user-name", "")
+        who = "Un donateur anonyme" if kind == "anonsubgift" else name
+        return f"{who} offre un abonnement {tier}à {to} !" if to else ""
+    if kind in ("submysterygift", "anonsubmysterygift") and count.isdigit():
+        who = "Un donateur anonyme" if kind == "anonsubmysterygift" else name
+        n = int(count)
+        return f"{who} offre {n} abonnement{'s' if n > 1 else ''} {tier}à la communauté !"
+    if kind == "raid":
+        viewers = tags.get("msg-param-viewerCount", "")
+        raider = tags.get("msg-param-displayName") or name
+        return f"{raider} lance un raid avec {viewers} spectateurs !" if viewers.isdigit() else ""
+    if kind in ("giftpaidupgrade", "anongiftpaidupgrade"):
+        sender = tags.get("msg-param-sender-name") or "un donateur anonyme"
+        return f"{name} garde l'abonnement offert par {sender} !"
+    if kind == "primepaidupgrade":
+        return f"{name} passe de Prime à un abonnement {tier.strip() or 'payant'} !"
+    if kind == "bitsbadgetier" and tags.get("msg-param-threshold", "").isdigit():
+        return f"{name} vient de débloquer le badge des {tags['msg-param-threshold']} bits !"
+    return ""
 
 
 def twitch_event(line: str):
@@ -152,11 +218,17 @@ def twitch_event(line: str):
     tags, prefix, cmd, params, text = parse_irc(line)
     if cmd == "PRIVMSG":
         msg = _twitch_message(tags, prefix, text or "")
-        if tags.get("bits"):
+        msg.first = tags.get("first-msg") == "1"
+        if tags.get("bits", "").isdigit():
+            msg.bits = int(tags["bits"])
             msg.label, msg.accent, msg.event = f"{tags['bits']} Bits", TWITCH_PURPLE, "bits"
-        elif tags.get("custom-reward-id") or tags.get("msg-id") == "highlighted-message":
+        elif tags.get("msg-id") == "highlighted-message":
+            msg.notice = "highlighted-message"
+            msg.label, msg.accent, msg.event = "Message mis en avant", POINTS_TEAL, "points"
+        elif tags.get("custom-reward-id"):
+            msg.reward = True
             msg.label, msg.accent, msg.event = "Points de chaîne", POINTS_TEAL, "points"
-        elif tags.get("first-msg") == "1":
+        elif msg.first:
             msg.label, msg.accent = "Premier message", "#37D247"
         return ("message", msg)
     if cmd == "USERNOTICE":
@@ -164,11 +236,14 @@ def twitch_event(line: str):
         if kind == "subgift" and tags.get("msg-param-community-gift-id"):
             return None   # un des N abonnements d'un don groupé : l'annonce « offre N abonnements » suffit
         msg = _twitch_message(tags, prefix, text or "")
-        system = tags.get("system-msg", "").strip()
+        system = _notice_fr(kind, tags, msg.author) or tags.get("system-msg", "").strip()
         msg.label = system or _NOTICE_LABELS.get(kind, "Twitch")
         msg.system = bool(system)
         msg.accent = TWITCH_PURPLE
         msg.event = _NOTICE_EVENTS.get(kind, "")
+        msg.notice = kind
+        if kind == "announcement":
+            msg.announce = tags.get("msg-param-color", "PRIMARY").upper()
         return ("message", msg)
     if cmd == "CLEARMSG" and tags.get("target-msg-id"):
         return ("delete", "twitch", tags["target-msg-id"])
@@ -284,6 +359,8 @@ class TwitchReader(_Reader):
             if not self._joined:
                 self._joined = True
                 self.status("ok", f"connecté à #{self.channel}")
+                if tags.get("room-id"):   # badges de la chaîne et emotes 7TV / BTTV / FFZ
+                    self.emit("room", "twitch", tags["room-id"], self.channel)
         elif cmd == "RECONNECT":
             raise OSError("le serveur demande une reconnexion")
         elif cmd == "NOTICE" and text:
@@ -434,6 +511,23 @@ def _yt_role(badges) -> str:
     return role
 
 
+def _yt_badges(badges) -> list:
+    """Badges YouTube, comme dans son chat : propriétaire, modérateur, validé, badge de membre (image)."""
+    out = []
+    for b in badges or []:
+        r = b.get("liveChatAuthorBadgeRenderer") or {}
+        kind = (r.get("icon") or {}).get("iconType", "")
+        tip = r.get("tooltip") or ((r.get("accessibility") or {}).get("accessibilityData") or {}).get("label", "")
+        if kind in ("OWNER", "MODERATOR", "VERIFIED"):
+            out.append(("yt", kind.lower(), "", tip))
+        elif r.get("customThumbnail"):
+            thumbs = r["customThumbnail"].get("thumbnails") or []
+            if thumbs:
+                best = max(thumbs, key=lambda t: t.get("width", 0) if t.get("width", 0) <= 64 else -1)
+                out.append(("yt", "member", best.get("url", ""), tip or "Membre"))
+    return out
+
+
 def _yt_item(item: dict):
     for kind, r in (item or {}).items():
         if not isinstance(r, dict):
@@ -441,6 +535,7 @@ def _yt_item(item: dict):
         msg = ChatMessage("youtube", r.get("id", ""), _yt_text(r.get("authorName")) or "?",
                           r.get("authorExternalChannelId", ""), "", _yt_parts((r.get("message") or {}).get("runs")),
                           _yt_role(r.get("authorBadges")))
+        msg.badges = _yt_badges(r.get("authorBadges"))
         if kind == "liveChatTextMessageRenderer":
             return msg
         if kind == "liveChatPaidMessageRenderer":

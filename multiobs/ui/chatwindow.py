@@ -1,35 +1,57 @@
-"""Fenêtre du chat du live : Twitch, YouTube ou les deux réunis (un logo devant chaque message), avec le fil
-d'actualité en bas (abonnements, raids, bits, Super Chats, membres…).
+"""Fenêtre du chat du live, à l'identique du chat de Twitch : badges (abonnés avec leurs mois, modos, VIP, bits…),
+emotes Twitch et 7TV / BTTV / FFZ (animées), cheermotes, réponses, annonces, messages mis en avant, premiers
+messages, mentions de la chaîne, messages supprimés ; même police (Inter 13 px), mêmes lignes de 20 px, mêmes
+couleurs. YouTube dans le même style avec ses badges (propriétaire, modérateur, membre, validé).
 
-Lecture seule (lecteurs de livechat.py, dans des threads) ; pour écrire, les boutons du bas ouvrent le vrai
-chat de chaque plateforme. Tout se règle dans « Chat personnalisé » (menu du bouton Chat → Personnalisé…).
+Nos ajouts : multi-chat Twitch + YouTube (un logo devant chaque message), fil d'actualité en bas, une fenêtre par
+instance du live, « Chat personnalisé ». Lecture seule (lecteurs de livechat.py, dans des threads) ; pour écrire,
+les boutons du bas ouvrent le vrai chat de chaque plateforme.
 """
 import hashlib
 import html
 import queue
+import re
 import threading
 import time
 import urllib.request
 from collections import deque
 
-from PySide6.QtCore import QAbstractListModel, QByteArray, QModelIndex, QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QColor, QFont, QFontDatabase, QFontMetricsF, QImage, QPainter, QPainterPath,
+from PySide6.QtCore import (QAbstractListModel, QBuffer, QByteArray, QEvent, QIODevice, QModelIndex, QObject, QPointF,
+                            QRectF, QSize, Qt, QTimer, QUrl, Signal)
+from PySide6.QtGui import (QColor, QDesktopServices, QFont, QFontDatabase, QFontMetricsF, QImage, QImageReader,
+                           QLinearGradient, QMovie, QPainter, QPainterPath, QTextBlockFormat, QTextCursor,
                            QTextDocument, QTextOption)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView, QMenu,
                                QMessageBox, QPushButton, QSlider, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QToolButton, QToolTip, QVBoxLayout, QWidget)
 
-from .. import livechat, paths, twitch
+from .. import chatassets, livechat, paths, twitch
 from ..theme import YAMI, mix
 from .widgets import icon
 
 MAX_ROWS = 500           # messages gardés (bien plus quand on remonte lire : rien ne saute)
 MAX_FEED = 200           # lignes du fil d'actualité
 ROW = Qt.ItemDataRole.UserRole
-BG = "#16171D"
-TEXT = "#E6E8EE"
-MUTED = "#8B909C"
+# Couleurs du chat de Twitch (thème sombre).
+BG = "#18181B"
+TEXT = "#EFEFF1"
+MUTED = "#ADADB8"
+LINK = "#BF94FF"
+NOTICE_BG = "#1F1F23"
+TWITCH_PURPLE = "#9147FF"
+HIGHLIGHT = "#755EBC"    # message mis en avant (points de chaîne)
+MENTION = "#E91916"      # message qui mentionne la chaîne
+FIRST = ("#00F593", "#57BEE6")
+ANNOUNCE = {"PRIMARY": ("#9147FF", "#9147FF"), "BLUE": ("#00D6D6", "#9146FF"), "GREEN": ("#00DB84", "#57BEE6"),
+            "ORANGE": ("#FFB31A", "#E0E000"), "PURPLE": ("#9146FF", "#FF75E6")}
+# Mesures du chat de Twitch pour un texte de 13 px (tout suit la taille du texte).
+BASE_PX, PAD_X, PAD_Y = 13, 20, 5
+BADGE_FR = {"broadcaster": "Diffuseur", "moderator": "Modérateur", "vip": "VIP", "subscriber": "Abonné(e)",
+            "founder": "Fondateur", "premium": "Prime Gaming", "turbo": "Turbo", "partner": "Partenaire vérifié",
+            "staff": "Staff Twitch", "admin": "Admin Twitch", "artist-badge": "Artiste", "sub-gifter": "A offert des abonnements",
+            "bits": "Bits", "bits-leader": "Meilleur donneur de bits", "sub-gift-leader": "Meilleur donneur d'abonnements",
+            "no_audio": "Regarde sans le son", "no_video": "Écoute seulement"}
 NAMES = {"twitch": "Twitch", "youtube": "YouTube"}
 YT_ROLE_COLORS = {"owner": "#FFD600", "mod": "#5E84F1", "member": "#2BA640"}
 YT_COLORS = ["#FF7F50", "#9ACD32", "#1E90FF", "#FF69B4", "#DAA520", "#00C8FF", "#B57EDC", "#3CB371",
@@ -40,6 +62,7 @@ CHAT_MODES = [("twitch", "Chat Twitch", "twitch.svg"), ("youtube", "Chat YouTube
 FEED_NOTE = ("Les follows Twitch et les nouveaux abonnés YouTube ne passent pas par le chat : « Flux Twitch "
              "complet » (en haut du fil) ouvre le flux d'activité de Twitch, avec ton compte connecté dans Chrome "
              "ou Edge.")
+URL_RE = re.compile(r"^(https?://|www\.)\S+$", re.IGNORECASE)
 
 
 def _luminance(c: QColor) -> float:
@@ -65,6 +88,10 @@ def _pick(key: str, palette: list) -> str:
     return palette[int(hashlib.md5(key.encode("utf-8")).hexdigest()[:6], 16) % len(palette)]
 
 
+def _esc(text: str) -> str:
+    return html.escape(text, quote=True)
+
+
 _chat_family: str | None = None
 
 
@@ -88,10 +115,12 @@ def feed_events(settings: dict) -> set:
 
 
 class Row:
-    __slots__ = ("msg", "seq", "deleted", "color", "time")
+    __slots__ = ("msg", "seq", "deleted", "color", "time", "tips", "mention")
 
     def __init__(self, msg, seq: int, color: str, when: str = ""):
         self.msg, self.seq, self.deleted, self.color, self.time = msg, seq, False, color, when
+        self.tips: list = []       # infobulles des badges et emotes (liens « t:N » du texte)
+        self.mention = None        # mentionne la chaîne ? (calculé une fois)
 
 
 class ChatModel(QAbstractListModel):
@@ -154,26 +183,38 @@ class ChatModel(QAbstractListModel):
 
 
 class ImageStore(QObject):
-    """Logos et emotes, téléchargés une seule fois ; « changed » à chaque image arrivée. Threads « daemon » :
-    un téléchargement en cours ne retient pas Multi OBS à la fermeture."""
+    """Logos, badges et emotes, téléchargés une seule fois ; les animées (GIF, WebP) bougent comme sur Twitch.
+    « changed » : une image est arrivée ou une animée a changé (25 i/s au plus) ; « resized » : une image n'a
+    pas la forme prévue (emote large), il faut remettre en page. Threads « daemon » : un téléchargement en cours
+    ne retient pas Multi OBS à la fermeture."""
     changed = Signal()
+    resized = Signal()
     _loaded = Signal(str, object)
     WORKERS = 4
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, animate: bool = True):
         super().__init__(parent)
+        self.animate = animate
         self.images: dict[str, QImage] = {}
+        self.movies: dict[str, tuple] = {}     # url → (QMovie, QBuffer)
+        self.ratios: dict[str, float] = {}     # url → largeur / hauteur
         self._pending: set[str] = set()
         self._jobs: queue.Queue = queue.Queue()
         for i in range(self.WORKERS):
             threading.Thread(target=self._worker, daemon=True, name=f"chat-img-{i}").start()
         self._blank = QImage(1, 1, QImage.Format.Format_ARGB32_Premultiplied)
         self._blank.fill(Qt.GlobalColor.transparent)
+        self._dirty = False
+        self._tick = QTimer(self, interval=40, timeout=self._emit_tick)
         self._loaded.connect(self._on_loaded)
-        for name in NAMES:
-            self.images[f"logo:{name}"] = icon(f"{name}.svg").pixmap(64, 64).toImage()
+        for key, name in (("logo:twitch", "twitch.svg"), ("logo:youtube", "youtube.svg"),
+                          ("icon:moderator", "yt_moderator.svg"), ("icon:verified", "yt_verified.svg")):
+            self.images[key] = icon(name).pixmap(64, 64).toImage()
 
     def get(self, url: str) -> QImage:
+        movie = self.movies.get(url)
+        if movie is not None:
+            return movie[0].currentImage()
         img = self.images.get(url)
         if img is not None:
             return img
@@ -181,6 +222,9 @@ class ImageStore(QObject):
             self._pending.add(url)
             self._jobs.put(url)
         return self._blank   # transparent en attendant (pas l'icône « image manquante » de Qt)
+
+    def ratio(self, url: str) -> float:
+        return self.ratios.get(url, 0.0)
 
     def _worker(self) -> None:
         while True:
@@ -191,9 +235,9 @@ class ImageStore(QObject):
 
     def _fetch(self, url: str) -> None:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": livechat.UA})
+            req = urllib.request.Request(url, headers={"User-Agent": chatassets.UA})
             with urllib.request.urlopen(req, timeout=10) as r:
-                data = r.read(2_000_000)
+                data = r.read(4_000_000)
         except OSError:
             data = b""
         try:
@@ -204,18 +248,64 @@ class ImageStore(QObject):
     def _on_loaded(self, url: str, data) -> None:
         self._pending.discard(url)
         img = QImage()
-        self.images[url] = img if data and img.loadFromData(data) else self._blank   # jamais redemandée
+        if data:
+            probe = QBuffer()
+            probe.setData(QByteArray(data))
+            probe.open(QIODevice.OpenModeFlag.ReadOnly)
+            reader = QImageReader(probe)
+            reader.setDecideFormatFromContent(True)
+            if self.animate and reader.supportsAnimation() and reader.imageCount() > 1:
+                buf = QBuffer(self)
+                buf.setData(QByteArray(data))
+                buf.open(QIODevice.OpenModeFlag.ReadOnly)
+                movie = QMovie(buf, QByteArray(), self)
+                movie.setCacheMode(QMovie.CacheMode.CacheAll)
+                if movie.isValid():
+                    movie.frameChanged.connect(self._frame)
+                    movie.start()
+                    self.movies[url] = (movie, buf)
+                    img = movie.currentImage()
+            if img.isNull():
+                img.loadFromData(data)
+        if img.isNull():
+            self.images[url] = self._blank   # jamais redemandée
+        else:
+            self.images[url] = img
+            ratio = img.width() / max(1, img.height())
+            self.ratios[url] = ratio
+            if abs(ratio - 1.0) > 0.05:
+                self.resized.emit()
         self.changed.emit()
+
+    def _frame(self, _n: int) -> None:
+        self._dirty = True
+        if not self._tick.isActive():
+            self._tick.start()
+
+    def _emit_tick(self) -> None:
+        if self._dirty:
+            self._dirty = False
+            self.changed.emit()
+        else:
+            self._tick.stop()
+
+    def pause(self, paused: bool) -> None:
+        """Animations arrêtées quand la fenêtre est réduite ou cachée (rien ne tourne pour rien)."""
+        for movie, _buf in self.movies.values():
+            movie.setPaused(paused or not self.animate)
 
     def close(self) -> None:
         with self._jobs.mutex:   # images pas encore commencées : abandonnées
             self._jobs.queue.clear()
         for _ in range(self.WORKERS):
             self._jobs.put(None)
+        for movie, _buf in self.movies.values():
+            movie.stop()
+        self._tick.stop()
 
 
 class ChatDoc(QTextDocument):
-    """Texte d'un message ; ses images (emotes) viennent du magasin commun."""
+    """Texte d'un message ; ses images (badges, emotes) viennent du magasin commun."""
 
     def __init__(self, store: ImageStore):
         super().__init__()
@@ -226,39 +316,49 @@ class ChatDoc(QTextDocument):
 
 
 class MessageDelegate(QStyledItemDelegate):
-    """Un message : logo de la plateforme, pseudo en couleur, texte et emotes ; carte colorée s'il est mis en
-    avant (Super Chat, abonnement, raid…). Le texte passe à la ligne sous lui-même, pas sous le logo.
-    feed=True : ligne du fil d'actualité (barre de couleur à gauche, texte plus court)."""
-    PAD_Y, HL_MARGIN, HL_PAD, GAP = 3, 3, 6, 8
+    """Une ligne du chat comme sur Twitch : [logo en multi-chat] badges, pseudo en couleur, « : », message avec
+    emotes ; les lignes passent à la ligne sous les badges. Fond ou barre de couleur pour les annonces,
+    abonnements, mises en avant, premiers messages, mentions ; carte pour les Super Chats YouTube.
+    feed=True : ligne du fil d'actualité (logo, barre de couleur à gauche, texte court)."""
+    CARD_MARGIN, CARD_PAD, GAP = 3, 6, 8
 
     def __init__(self, win, view, feed: bool = False):
         super().__init__(win)
         self.win, self.view, self.feed = win, view, feed
         self.docs: dict[int, tuple] = {}
 
-    def _card(self, row: Row) -> bool:
-        return bool(row.msg.label) and not self.feed
-
-    def _geometry(self, row: Row, width: float):
-        logo = self.win.logo_px
-        if self._card(row):
-            text_x = 6 + 3 + 7 + logo + self.GAP
-            return text_x, max(40.0, width - text_x - 6 - 8)
-        text_x = (14 if self.feed else 10) + logo + self.GAP
-        return text_x, max(40.0, width - text_x - 10)
+    def _geometry(self, row: Row, width: float, style: dict | None = None):
+        """(début du texte, largeur du texte, marge haute)."""
+        if self.feed:
+            text_x = 14 + self.win.logo_px + self.GAP
+            return text_x, max(40.0, width - text_x - 10), PAD_Y - 2
+        style = self.win.row_style(row) if style is None else style
+        if style.get("card"):
+            text_x = 8 + 3 + 10
+            return text_x, max(40.0, width - text_x - 8 - 10), self.CARD_MARGIN + self.CARD_PAD
+        text_x = PAD_X if not style.get("stripe") else max(PAD_X, style["stripe_w"] + 12)
+        return text_x, max(40.0, width - text_x - PAD_X), PAD_Y
 
     def doc(self, row: Row, width: float) -> ChatDoc:
-        key = (round(width), self.win.font_key, row.deleted)
+        key = (round(width), self.win.font_key, self.win.assets_key, row.deleted)
         cached = self.docs.get(row.seq)
         if cached and cached[0] == key:
             return cached[1]
         doc = ChatDoc(self.win.images)
         doc.setDefaultFont(self.win.chat_font)
         doc.setDocumentMargin(0)
+        doc.setDefaultStyleSheet("a { text-decoration: none; }")
         opt = QTextOption()
         opt.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         doc.setDefaultTextOption(opt)
+        self.win.html_width = width   # en-tête de réponse : une seule ligne, coupée par « … » comme sur Twitch
         doc.setHtml(self.win.feed_html(row) if self.feed else self.win.message_html(row))
+        if not self.feed:   # lignes de 20 px comme sur Twitch (les emotes débordent un peu, pareil)
+            cur = QTextCursor(doc)
+            cur.select(QTextCursor.SelectionType.Document)
+            fmt = QTextBlockFormat()
+            fmt.setLineHeight(self.win.line_px, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
+            cur.mergeBlockFormat(fmt)
         doc.setTextWidth(width)
         self.docs[row.seq] = (key, doc)
         return doc
@@ -266,47 +366,86 @@ class MessageDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         row = index.data(ROW)
         width = self.view.viewport().width()
-        _x, text_w = self._geometry(row, width)
-        h = max(self.doc(row, text_w).size().height(), self.win.line_px)
-        h += 2 * (self.HL_MARGIN + self.HL_PAD) if self._card(row) else 2 * self.PAD_Y
+        style = {} if self.feed else self.win.row_style(row)
+        _x, text_w, top = self._geometry(row, width, style)
+        h = max(self.doc(row, text_w).size().height(), self.win.line_px) + 2 * top
         return QSize(int(width), int(h + 0.999))
 
     def paint(self, p: QPainter, option, index):
         row = index.data(ROW)
         r = QRectF(option.rect)
-        text_x, text_w = self._geometry(row, r.width())
+        style = {} if self.feed else self.win.row_style(row)
+        text_x, text_w, top = self._geometry(row, r.width(), style)
         doc = self.doc(row, text_w)
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        if option.state & QStyle.StateFlag.State_MouseOver:
-            p.fillRect(r, QColor(255, 255, 255, 9))
-        accent = QColor(row.msg.accent or YAMI["blue2"])
-        if self._card(row):
-            card = r.adjusted(6, self.HL_MARGIN, -6, -self.HL_MARGIN)
+        if style.get("card"):
+            card = r.adjusted(8, self.CARD_MARGIN, -8, -self.CARD_MARGIN)
             path = QPainterPath()
-            path.addRoundedRect(card, 7, 7)
+            path.addRoundedRect(card, 6, 6)
+            accent = QColor(style["card"])
             p.fillPath(path, QColor(mix(BG, accent.name(), 0.22)))
             p.save()
             p.setClipPath(path)
             p.fillRect(QRectF(card.left(), card.top(), 3, card.height()), accent)
             p.restore()
-            top = card.top() + self.HL_PAD
-            logo_x = card.left() + 3 + 7
-        else:
-            top = r.top() + self.PAD_Y
-            logo_x = r.left() + (14 if self.feed else 10)
-            if self.feed:
-                bar = QPainterPath()
-                bar.addRoundedRect(QRectF(r.left() + 5, r.top() + 3, 3, r.height() - 6), 1.5, 1.5)
-                p.fillPath(bar, accent)
-        logo = self.win.logo_px
-        img = self.win.images.images.get(f"logo:{row.msg.platform}")
-        if img is not None:
-            p.drawImage(QRectF(logo_x, top + (self.win.line_px - logo) / 2, logo, logo), img)
-        p.translate(r.left() + text_x, top)
+        elif style.get("bg"):
+            p.fillRect(r, QColor(style["bg"]))
+        if style.get("stripe"):
+            c1, c2 = style["stripe"]
+            grad = QLinearGradient(r.left(), r.top(), r.left(), r.bottom())
+            grad.setColorAt(0, QColor(c1))
+            grad.setColorAt(1, QColor(c2))
+            p.fillRect(QRectF(r.left(), r.top(), style["stripe_w"], r.height()), grad)
+        if option.state & QStyle.StateFlag.State_MouseOver:
+            p.fillRect(r, QColor(255, 255, 255, 10))
+        if self.feed:
+            accent = QColor(row.msg.accent or YAMI["blue2"])
+            bar = QPainterPath()
+            bar.addRoundedRect(QRectF(r.left() + 5, r.top() + 3, 3, r.height() - 6), 1.5, 1.5)
+            p.fillPath(bar, accent)
+            img = self.win.images.images.get(f"logo:{row.msg.platform}")
+            if img is not None:
+                logo = self.win.logo_px
+                p.drawImage(QRectF(r.left() + 14, r.top() + top + (self.win.line_px - logo) / 2, logo, logo), img)
+        p.translate(r.left() + text_x, r.top() + top)
         doc.drawContents(p)
         p.restore()
+
+    def _anchor(self, row: Row, rect, pos) -> str:
+        style = {} if self.feed else self.win.row_style(row)
+        text_x, text_w, top = self._geometry(row, rect.width(), style)
+        doc = self.doc(row, text_w)
+        return doc.documentLayout().anchorAt(QPointF(pos.x() - rect.left() - text_x, pos.y() - rect.top() - top))
+
+    def helpEvent(self, event, view, option, index):
+        """Infobulle des badges et des emotes (comme sur Twitch), ou l'adresse d'un lien."""
+        row = index.data(ROW) if index.isValid() else None
+        if row is not None and event.type() == QEvent.Type.ToolTip:
+            a = self._anchor(row, option.rect, event.pos())
+            tip = ""
+            if a.startswith("t:") and a[2:].isdigit() and int(a[2:]) < len(row.tips):
+                tip = row.tips[int(a[2:])]
+            elif a.startswith(("http://", "https://")):
+                tip = a
+            if tip:
+                QToolTip.showText(event.globalPos(), tip, view)
+                return True
+            QToolTip.hideText()
+            return True
+        return super().helpEvent(event, view, option, index)
+
+    def editorEvent(self, event, model, option, index):
+        """Clic sur un lien du chat : il s'ouvre dans le navigateur."""
+        if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            row = index.data(ROW)
+            if row is not None:
+                a = self._anchor(row, option.rect, event.position())
+                if a.startswith(("http://", "https://")):
+                    QDesktopServices.openUrl(QUrl(a))
+                    return True
+        return False
 
     def forget(self, rows) -> None:
         for row in rows:
@@ -374,6 +513,23 @@ class _Bridge(QObject):
     event = Signal(object)
 
 
+class _AssetLoader(QObject):
+    """Badges de la chaîne et emotes 7TV / BTTV / FFZ, chargés dans un thread (chatassets)."""
+    ready = Signal(object)
+
+    def start(self, login: str, room_id: str) -> None:
+        threading.Thread(target=self._work, args=(login, room_id), daemon=True, name="chat-assets").start()
+
+    def _work(self, login: str, room_id: str) -> None:
+        g = chatassets.load_global()
+        c = chatassets.load_channel(login, room_id)
+        data = {"badges": {**g["badges"], **c["badges"]}, "emotes": {**g["emotes"], **c["emotes"]}}
+        try:
+            self.ready.emit(data)
+        except RuntimeError:   # fenêtre fermée entre-temps
+            pass
+
+
 class LiveFinder(QObject):
     """Cherche le live YouTube de la chaîne dans un thread : done((id de la vidéo, "") ou (None, explication))."""
     done = Signal(object)
@@ -415,10 +571,19 @@ class ChatWindow(QWidget):
         self.platforms = [p for p in NAMES if p in platforms]
         self.set_name(name)
         self.setMinimumSize(300, 260)
-        self.images = ImageStore(self)
+        self.images = ImageStore(self, bool(settings.get("chat_animated", True)))
         self.images.changed.connect(self._repaint)
+        self.images.resized.connect(self._relayout_soon)
+        self._relayout_timer = QTimer(self, singleShot=True, interval=250, timeout=self._relayout_all)
         self._bridge = _Bridge(self)
         self._bridge.event.connect(self._on_event)
+        self._assets = _AssetLoader(self)
+        self._assets.ready.connect(self._on_assets)
+        self.badges: dict = {}           # badges Twitch « set/version » → (image, titre)
+        self.emotes: dict = {}           # emotes 7TV / BTTV / FFZ « mot » → (image, largeur, hauteur, source)
+        self.assets_key = 0              # change quand badges / emotes arrivent : les messages se redessinent
+        self.html_width = 400.0          # largeur du texte du message en cours de mise en page
+        self._room = ""
         self.readers: dict[str, livechat._Reader] = {}
         self.youtube_video = ""
         self._queue: list = []
@@ -428,7 +593,7 @@ class ChatWindow(QWidget):
         self._unread = 0
         self._split_ready = False
         self._flush = QTimer(self, singleShot=True, interval=80, timeout=self._flush_queue)
-        self._apply_font(int(settings.get("chat_font_pt", 11)))
+        self._apply_font(int(settings.get("chat_font_px", BASE_PX)))
         self._events = feed_events(settings)
 
         lay = QVBoxLayout(self)
@@ -477,9 +642,9 @@ class ChatWindow(QWidget):
         self.split.addWidget(self.view)
         self.more = QPushButton(self.view)
         self.more.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.more.setStyleSheet(f"QPushButton {{ background: {YAMI['blue2']}; color: white; border: none; "
+        self.more.setStyleSheet(f"QPushButton {{ background: {TWITCH_PURPLE}; color: white; border: none; "
                                 f"border-radius: 13px; padding: 4px 14px; font-weight: 600; }}"
-                                f"QPushButton:hover {{ background: {YAMI['blue1']}; }}")
+                                f"QPushButton:hover {{ background: #772CE8; }}")
         self.more.clicked.connect(self.scroll_to_end)
         self.more.hide()
 
@@ -558,17 +723,21 @@ class ChatWindow(QWidget):
         return b
 
     def apply_settings(self) -> None:
-        """Réglages du chat (fil d'actualité, taille du texte, toujours devant), à l'ouverture ou après
+        """Réglages du chat (fil d'actualité, texte, emotes, toujours devant), à l'ouverture ou après
         « Chat personnalisé »."""
         s = self.settings
         self._events = feed_events(s)
         self.feed_btn.setChecked(bool(s.get("chat_feed", True)))
         self._show_feed(self.feed_btn.isChecked())
         self.pin.setChecked(bool(s.get("chat_on_top", False)))
-        pt = int(s.get("chat_font_pt", 11))
-        if pt != self.font_pt:
-            self._apply_font(pt)
-            self._relayout_all()
+        animate = bool(s.get("chat_animated", True))
+        if animate != self.images.animate:
+            self.images.animate = animate
+            self.images.pause(not self.isVisible() or self.isMinimized())
+        px = int(s.get("chat_font_px", BASE_PX))
+        if px != self.font_px:
+            self._apply_font(px)
+        self._relayout_all()   # emotes 7TV / BTTV / FFZ peut-être activées ou coupées
 
     def _show_feed(self, on: bool) -> None:
         self.settings["chat_feed"] = on
@@ -587,9 +756,19 @@ class ChatWindow(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
+        self.images.pause(False)
         if not self._split_ready:   # tailles connues seulement une fois la fenêtre affichée
             self._split_ready = True
             QTimer.singleShot(0, self._apply_split)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self.images.pause(True)
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if e.type() == QEvent.Type.WindowStateChange:
+            self.images.pause(self.isMinimized())
 
     # ------------------------------------------------------------------ lecteurs
     def _link(self, platform: str) -> str:
@@ -641,6 +820,10 @@ class ChatWindow(QWidget):
             self._set_status(ev[1], ev[2], ev[3])
         elif kind == "live":
             self.youtube_video = ev[2]
+        elif kind == "room":
+            if ev[2] != self._room:
+                self._room = ev[2]
+                self._assets.start(ev[3], ev[2])
         elif kind == "message":
             msg = ev[1]
             key = (msg.platform, msg.id)
@@ -655,6 +838,10 @@ class ChatWindow(QWidget):
                 self._flush.start()
         elif kind in ("delete", "delete_author", "clear"):
             self._delete(kind, ev[1], ev[2] if len(ev) > 2 else "")
+
+    def _on_assets(self, data: dict) -> None:
+        self.badges, self.emotes = data["badges"], data["emotes"]
+        self._relayout_all()
 
     # ------------------------------------------------------------------ messages
     def _color(self, msg) -> str:
@@ -719,33 +906,196 @@ class ChatWindow(QWidget):
             if at_end:   # la hauteur du message change : on reste collé en bas
                 self.view.scrollToBottom()
 
-    def _parts_html(self, m, size: int) -> str:
-        return "".join(html.escape(p[1]) if p[0] == "text" else
-                       f'<img src="{html.escape(p[1], quote=True)}" width="{size}" height="{size}" '
-                       f'style="vertical-align: middle">' for p in m.parts)
+    # ------------------------------------------------------------------ rendu, comme le chat de Twitch
+    def _me(self, platform: str) -> str:
+        """Nom de la chaîne, pour repérer les messages qui la mentionnent."""
+        if platform == "twitch":
+            return self._link("twitch").lower()
+        label = livechat.youtube_label(self.settings.get("youtube_channel", ""))
+        return label[1:].lower() if label.startswith("@") else ""
+
+    def _mentions(self, row: Row) -> bool:
+        if row.mention is None:
+            m, me = row.msg, self._me(row.msg.platform)
+            words = {w.strip(".,!?:;)(").lower() for w in m.text().split() if w.startswith("@")}
+            row.mention = bool(me) and m.author_key.lower() != me and m.login != me and (
+                f"@{me}" in words or (bool(m.reply) and m.reply[0].lower() == me))
+        return row.mention
+
+    def row_style(self, row: Row) -> dict:
+        """Fond / barre de couleur de la ligne, comme sur Twitch ; carte pour les Super Chats YouTube."""
+        m = row.msg
+        if m.platform == "youtube":
+            return {"card": m.accent or YAMI["blue2"]} if m.label else (
+                {"bg": mix(BG, MENTION, 0.28)} if self._mentions(row) else {})
+        if m.notice == "announcement":
+            return {"bg": NOTICE_BG, "stripe": ANNOUNCE.get(m.announce, ANNOUNCE["PRIMARY"]), "stripe_w": 6}
+        if m.notice == "highlighted-message":
+            return {"bg": mix(BG, HIGHLIGHT, 0.55)}
+        if m.notice:   # abonnement, réabonnement, abonnements offerts, raid…
+            return {"bg": NOTICE_BG, "stripe": (TWITCH_PURPLE, TWITCH_PURPLE), "stripe_w": 4}
+        if self._mentions(row):
+            return {"bg": mix(BG, MENTION, 0.28)}
+        if m.first:
+            return {"bg": mix(BG, FIRST[1], 0.10), "stripe": FIRST, "stripe_w": 4}
+        if m.reward:
+            return {"bg": mix(BG, HIGHLIGHT, 0.18)}
+        return {}
+
+    def _img(self, url: str, w: float, h: float, tip_index: int | None) -> str:
+        img = (f'<img src="{_esc(url)}" width="{round(w)}" height="{round(h)}" style="vertical-align: middle">')
+        return f'<a href="t:{tip_index}">{img}</a>' if tip_index is not None else img
+
+    def _emote_size(self, url: str, w: float = 0, h: float = 0):
+        ratio = (w / h) if w and h else (self.images.ratio(url) or 1.0)
+        return self.emote_px * ratio, self.emote_px
+
+    def _text_html(self, text: str, row: Row, tip) -> str:
+        """Texte d'un message : emotes 7TV / BTTV / FFZ, cheermotes, @mentions, liens."""
+        m, me = row.msg, self._me(row.msg.platform)
+        third = self.emotes if m.platform == "twitch" and self.settings.get("chat_third_party", True) else {}
+        out = []
+        for token in re.split(r"(\s+)", text):
+            if not token:
+                continue
+            if token.isspace():
+                out.append(" ")
+                continue
+            e = third.get(token)
+            if e:
+                w, h = self._emote_size(e[0], e[1], e[2])
+                out.append(self._img(e[0], w, h, tip(f"{token}\n{e[3]}")))
+                continue
+            c = chatassets.cheer(token) if m.bits else None
+            if c:
+                out.append(self._img(c[0], self.emote_px, self.emote_px, tip(f"{c[1]} bits")))
+                out.append(f'<span style="color:{c[2]};font-weight:700">{c[1]}</span>')
+                continue
+            if token.startswith("@") and len(token) > 1:
+                name = token[1:].rstrip(".,!?:;)(").lower()
+                if me and name == me:   # la chaîne est mentionnée : comme sur Twitch, en rouge
+                    out.append(f'<span style="background-color:{MENTION};color:#FFFFFF;font-weight:700">'
+                               f'{_esc(token)}</span>')
+                else:
+                    out.append(f'<span style="font-weight:700">{_esc(token)}</span>')
+                continue
+            if URL_RE.match(token):
+                url = token if token.lower().startswith("http") else "https://" + token
+                out.append(f'<a href="{_esc(url)}" style="color:{LINK}">{_esc(token)}</a>')
+                continue
+            out.append(_esc(token))
+        return "".join(out)
+
+    def _body_html(self, row: Row, tip) -> str:
+        m = row.msg
+        out = []
+        for p in m.parts:
+            if p[0] == "emote":
+                out.append(self._img(p[1], *self._emote_size(p[1]), tip(p[2])))
+            else:
+                out.append(self._text_html(p[1], row, tip))
+        return "".join(out)
+
+    def _badges_html(self, m, tip) -> str:
+        size, out = self.badge_px, []
+        if m.platform == "twitch":
+            for set_id, version in m.badges:
+                entry = self.badges.get(f"{set_id}/{version}") or (
+                    self.badges.get(f"{set_id}/0") if set_id == "subscriber" else None)
+                if not entry:
+                    continue
+                url, title = entry
+                months = m.badge_info.get(set_id, "")
+                if set_id in ("subscriber", "founder") and months.isdigit():
+                    title = f"{BADGE_FR.get(set_id, title)} depuis {months} mois"
+                elif set_id in BADGE_FR and set_id != "bits":
+                    title = BADGE_FR[set_id]
+                out.append(self._img(url, size, size, tip(title)) + "&#8202;")
+        else:
+            for _yt, kind, url, title in m.badges:
+                src = url if kind == "member" else f"icon:{kind}" if kind in ("moderator", "verified") else ""
+                if src:
+                    out.append(self._img(src, size, size, tip(title or kind)) + "&#8202;")
+        return "".join(out)
+
+    def _name_html(self, row: Row) -> str:
+        m = row.msg
+        if m.platform == "youtube" and m.role == "owner":   # propriétaire : nom sur fond jaune, comme YouTube
+            return (f'<span style="background-color:#FFD600;color:#0F0F0F;font-weight:700">&nbsp;{_esc(m.author)}'
+                    f'&nbsp;</span>')
+        name = _esc(m.author)
+        if m.platform == "twitch" and m.login and m.author.lower() != m.login:   # pseudo localisé : (login)
+            name += f" ({_esc(m.login)})"
+        return f'<span style="color:{row.color};font-weight:700">{name}</span>'
+
+    def _header_html(self, row: Row) -> str:
+        m, small = row.msg, f"font-size:{self.font_px - 1}px"
+        if m.platform == "youtube":
+            return (f'<span style="color:{readable(m.accent or YAMI["blue1"])};font-weight:700">{_esc(m.label)}</span>'
+                    if m.label else "")
+        if m.notice == "announcement":
+            return f'<span style="color:{MUTED};font-weight:700;{small}">📢 Annonce</span>'
+        if m.notice == "highlighted-message":
+            return f'<span style="color:#FFFFFF;font-weight:700;{small}">Message mis en avant</span>'
+        if m.notice:
+            return f'<span style="color:{TEXT};font-weight:600">{_esc(m.label)}</span>'
+        if m.reward:
+            return (f'<span style="color:{MUTED};{small}">{_esc(m.author)} a utilisé une récompense de points de '
+                    f'chaîne</span>')
+        if m.first:
+            return f'<span style="color:{FIRST[1]};font-weight:700;{small}">✦ Premier message</span>'
+        return ""
 
     def message_html(self, row: Row) -> str:
         m = row.msg
-        name = f'<span style="color:{row.color};font-weight:700">{html.escape(m.author)}</span>'
-        body = f'<i style="color:{MUTED}">message supprimé</i>' if row.deleted else self._parts_html(m, self.emote_px)
-        if m.action and not row.deleted:
-            line = f'{name} <span style="color:{row.color}"><i>{body}</i></span>'
-        elif m.parts or row.deleted:
-            line = f'{name}<span style="color:{TEXT}">: {body}</span>'
+        row.tips = []
+
+        def tip(text: str) -> int:
+            row.tips.append(text)
+            return len(row.tips) - 1
+        lines = []
+        head = self._header_html(row)
+        if head:
+            lines.append(head)
+        if m.reply:   # réponse : « ↳ En réponse à @pseudo : son message », sur une ligne comme sur Twitch
+            small = QFont(self.chat_font)
+            small.setPixelSize(self.font_px - 1)
+            text = QFontMetricsF(small).elidedText(f"↳ En réponse à @{m.reply[0]} : {m.reply[1]}",
+                                                   Qt.TextElideMode.ElideRight, max(40.0, self.html_width - 4))
+            lines.append(f'<span style="color:{MUTED};font-size:{self.font_px - 1}px">{_esc(text)}</span>')
+        # Multi-chat : logo de la plateforme sur la ligne du pseudo (sur la 1re ligne s'il n'y en a pas).
+        logo = (f'{self._img("logo:" + m.platform, self.logo_px, self.logo_px, None)}&nbsp;'
+                if len(self.platforms) > 1 else "")
+        if m.platform == "twitch" and m.notice and m.notice not in ("highlighted-message", "announcement") \
+                and m.system and not m.parts:
+            if lines:   # abonnement, raid… sans message : la phrase de Twitch suffit
+                lines[0] = logo + lines[0]
         else:
-            line = "" if m.system else name
-        label = (f'<div style="color:{readable(m.accent or YAMI["blue1"])};font-weight:700">{html.escape(m.label)}</div>'
-                 if m.label else "")
-        return f'<div style="color:{TEXT}">{label}{f"<div>{line}</div>" if line else ""}</div>'
+            badges = self._badges_html(m, tip)
+            name = self._name_html(row)
+            if row.deleted:
+                line = f'{name}<span style="color:{TEXT}">: </span><span style="color:{MUTED}">&lt;message supprimé&gt;</span>'
+            elif m.action:   # /me : tout le message à la couleur du pseudo, sans « : »
+                line = f'{name} <span style="color:{row.color}">{self._body_html(row, tip)}</span>'
+            elif m.parts:
+                line = f'{name}<span style="color:{TEXT}">: {self._body_html(row, tip)}</span>'
+            else:
+                line = name
+            lines.append(logo + badges + line)
+        return f'<div style="color:{TEXT}">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
 
     def feed_html(self, row: Row) -> str:
         """Ligne du fil : « pseudo · quoi · heure », puis le message éventuel."""
         m = row.msg
-        what = f'<span style="color:{readable(m.accent or YAMI["blue1"])};font-weight:700">{html.escape(m.label)}</span>'
-        head = what if m.system else (f'<span style="color:{row.color};font-weight:700">{html.escape(m.author)}</span>'
+        what = f'<span style="color:{readable(m.accent or YAMI["blue1"])};font-weight:700">{_esc(m.label)}</span>'
+        head = what if m.system else (f'<span style="color:{row.color};font-weight:700">{_esc(m.author)}</span>'
                                       f'<span style="color:{MUTED}"> · </span>{what}')
         when = f'<span style="color:{MUTED}"> · {row.time}</span>'
-        detail = f'<div style="color:#C3C7D0">{self._parts_html(m, self.emote_px)}</div>' if m.parts else ""
+        detail = ""
+        if m.parts:
+            parts = "".join(_esc(p[1]) if p[0] == "text" else self._img(p[1], *self._emote_size(p[1]), None)
+                            for p in m.parts)
+            detail = f'<div style="color:#C3C7D0">{parts}</div>'
         return f'<div style="color:{TEXT}">{head}{when}{detail}</div>'
 
     def clear(self) -> None:
@@ -792,29 +1142,37 @@ class ChatWindow(QWidget):
         self.feed_view.viewport().update()
 
     # ------------------------------------------------------------------ texte, fenêtre
-    def _apply_font(self, pt: int) -> None:
-        self.font_pt = max(8, min(22, pt))
+    def _apply_font(self, px: int) -> None:
+        """Taille du texte en pixels (13 px comme Twitch) ; lignes, badges et emotes suivent ses mesures."""
+        self.font_px = max(10, min(24, px))
         family = chat_family()   # Inter, comme le chat de Twitch
         font = QFont(family) if family else QFont(QApplication.font())
-        font.setPointSizeF(self.font_pt)
+        font.setPixelSize(self.font_px)
         self.chat_font = font
-        fm = QFontMetricsF(font)
-        self.line_px = fm.height()
-        self.logo_px = round(fm.height() * 0.95)
-        self.emote_px = round(fm.height() * 1.45)
-        self.font_key = self.font_pt
+        scale = self.font_px / BASE_PX
+        self.line_px = round(20 * scale)
+        self.badge_px = round(18 * scale)
+        self.emote_px = round(28 * scale)
+        self.logo_px = round(16 * scale)
+        self.font_key = self.font_px
 
     def _relayout_all(self) -> None:
         at_end = self._at_end()
+        self.assets_key += 1
         for view, delegate in ((self.view, self.delegate), (self.feed_view, self.feed_delegate)):
             delegate.docs.clear()
             view.relayout()
         if at_end:
             QTimer.singleShot(0, self.view.scrollToBottom)
 
+    def _relayout_soon(self) -> None:
+        """Emote large arrivée : remise en page groupée (pas une par image)."""
+        if not self._relayout_timer.isActive():
+            self._relayout_timer.start()
+
     def _step_font(self, step: int) -> None:
-        self._apply_font(self.font_pt + step)
-        self.settings["chat_font_pt"] = self.font_pt
+        self._apply_font(self.font_px + step)
+        self.settings["chat_font_px"] = self.font_px
         self._relayout_all()
 
     def _set_on_top(self, on: bool) -> None:
@@ -849,7 +1207,7 @@ class ChatWindow(QWidget):
         if not isinstance(geos, dict):
             geos = s["chat_geometries"] = {}
         geos[self.key] = bytes(self.saveGeometry().toBase64()).decode("ascii")
-        s["chat_font_pt"] = self.font_pt
+        s["chat_font_px"] = self.font_px
         s["chat_on_top"] = self.pin.isChecked()
         if self.feed_box.isVisible():
             sizes = self.split.sizes()
@@ -862,7 +1220,7 @@ class ChatWindow(QWidget):
 
 class ChatSettingsDialog(QDialog):
     """« Chat personnalisé » : ce que le bouton Chat de l'instance ouvre (mode, propre à chaque instance du live),
-    et pour toutes les fenêtres du chat : les chaînes, le fil d'actualité, le texte."""
+    et pour toutes les fenêtres du chat : les chaînes, le fil d'actualité, le texte et les emotes."""
 
     def __init__(self, settings: dict, parent=None, mode: str = "twitch", name: str = ""):
         super().__init__(parent)
@@ -932,11 +1290,18 @@ class ChatSettingsDialog(QDialog):
 
         g = QGroupBox("Fenêtre")
         form = QFormLayout(g)
-        self.font_pt = QSpinBox()
-        self.font_pt.setRange(8, 22)
-        self.font_pt.setSuffix(" pt")
-        self.font_pt.setValue(int(settings.get("chat_font_pt", 11)))
-        form.addRow("Taille du texte", self.font_pt)
+        self.font_px = QSpinBox()
+        self.font_px.setRange(10, 24)
+        self.font_px.setSuffix(" px")
+        self.font_px.setValue(int(settings.get("chat_font_px", BASE_PX)))
+        self.font_px.setToolTip("13 px : la taille du chat de Twitch")
+        form.addRow("Taille du texte", self.font_px)
+        self.third_party = QCheckBox("Emotes 7TV, BTTV et FFZ de la chaîne (comme avec leurs extensions)")
+        self.third_party.setChecked(bool(settings.get("chat_third_party", True)))
+        form.addRow(self.third_party)
+        self.animated = QCheckBox("Emotes animées")
+        self.animated.setChecked(bool(settings.get("chat_animated", True)))
+        form.addRow(self.animated)
         self.on_top = QCheckBox("Toujours devant les autres fenêtres")
         self.on_top.setChecked(bool(settings.get("chat_on_top", False)))
         form.addRow(self.on_top)
@@ -965,6 +1330,8 @@ class ChatSettingsDialog(QDialog):
         s["chat_feed"] = self.feed.isChecked()
         s["chat_feed_pct"] = self.pct.value() * 5
         s["chat_feed_events"] = [k for k, box in self.events.items() if box.isChecked()]
-        s["chat_font_pt"] = self.font_pt.value()
+        s["chat_font_px"] = self.font_px.value()
+        s["chat_third_party"] = self.third_party.isChecked()
+        s["chat_animated"] = self.animated.isChecked()
         s["chat_on_top"] = self.on_top.isChecked()
         super().accept()

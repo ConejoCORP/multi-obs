@@ -39,7 +39,9 @@ DEFAULT_SETTINGS = {
     "chat_native_single": False,      # Twitch / YouTube seul : vrai chat du site au lieu de la fenêtre du chat
     "chat_feed": True,                # fenêtre du chat : fil d'actualité en bas (abonnements, raids, bits…)
     "chat_feed_pct": 20,              # … sur 20 % de la hauteur ; chat_feed_events : ce qu'il montre (absent : tout)
-    "chat_font_pt": 11,               # fenêtre du chat : taille du texte, toujours devant, place de la fenêtre
+    "chat_font_px": 13,               # fenêtre du chat : taille du texte (13 px comme Twitch), toujours devant…
+    "chat_third_party": True,         # emotes 7TV / BTTV / FFZ de la chaîne (comme avec leurs extensions)
+    "chat_animated": True,            # emotes animées
     "chat_on_top": False,             # chat_geometries : place de la fenêtre du chat de chaque instance
     "creator_in_name": True,          # décoché : les fichiers n'ont pas ton nom (enregistrements solo)
     "video_name": "",

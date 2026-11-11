@@ -3,6 +3,23 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.11
+
+- **Le chat est maintenant identique à celui de Twitch**, en gardant tes ajouts :
+  - **badges** de chacun (diffuseur, modos, VIP, abonnés avec leurs mois, fondateurs, bits, Prime…), avec leur
+    nom en français au survol ;
+  - **emotes** Twitch et celles de la chaîne sur **7TV, BTTV et FFZ** (comme avec leurs extensions), **animées** ;
+  - **cheermotes** des bits, **réponses** (« ↳ En réponse à @pseudo : … »), **annonces** avec leur couleur,
+    messages **mis en avant** et récompenses de points de chaîne, **premiers messages**, **mentions** de ta chaîne
+    en rouge, **liens** cliquables, abonnements, dons et raids écrits en français, pseudos en couleur, messages
+    supprimés ;
+  - même police (Inter 13 px), mêmes lignes et mêmes couleurs que Twitch en thème sombre.
+- **YouTube dans le même style**, avec ses badges : propriétaire (nom sur fond jaune), modérateurs (clé),
+  membres (badge de la chaîne), comptes validés.
+- Toujours là : multi-chat avec un logo devant chaque message, fil d'actualité en bas, une fenêtre par instance
+  du live. **Personnalisé…** règle en plus la taille du texte en pixels (13 px comme Twitch), les emotes 7TV /
+  BTTV / FFZ et les emotes animées.
+
 ## 1.1.10
 
 - **Caméras virtuelles : l'image d'attente s'affiche aussi quand l'instance est fermée.** Avant, dans
