@@ -3,6 +3,16 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.12
+
+- **Les OBS ne restent plus en surbrillance orange dans la barre des tâches quand ils s'ouvrent.** À la fin
+  de son démarrage, OBS demande à passer au premier plan. Si tu utilises le PC à ce moment-là, Windows le lui
+  refuse : il fait clignoter son bouton, puis le laisse orange jusqu'à ce que tu cliques dessus. Multi OBS
+  éteint maintenant ce clignotement dès qu'il commence, pour les OBS qu'il vient d'ouvrir. Les fenêtres d'OBS
+  qui attendent une réponse (erreur, confirmation…) clignotent toujours.
+- Pour retrouver l'ancien comportement : ⚙ → **Général** → « Barre des tâches : mettre les OBS en
+  surbrillance quand ils s'ouvrent » (décoché par défaut).
+
 ## 1.1.11
 
 - **Le chat est maintenant identique à celui de Twitch**, en gardant tes ajouts :

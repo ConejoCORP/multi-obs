@@ -23,6 +23,7 @@ DEFAULT_SETTINGS = {
     "preview_background_fps": -1,     # -1 : comme au premier plan
     "live_color": "purple",           # pastille LIVE de l'aperçu et de la carte (le rec reste rouge)
     "taskbar_rename": True,
+    "obs_taskbar_flash": False,         # OBS en surbrillance (orange) dans la barre des tâches à l'ouverture
     "check_updates": True,
     "on_close": "ask",                # instances allumées à la fermeture : ask / keep / stop
     "rec_types": [["cam", "Cam"], ["ecran", "Écran"], ["live", "Live"]],   # modifiables dans les paramètres
@@ -209,6 +210,20 @@ class Manager(QObject):
 
     def any_running(self) -> bool:
         return any(c.running for c in self.controllers.values())
+
+    def quiet_launch_flash(self, hwnd: int) -> bool:
+        """Un bouton clignote dans la barre des tâches. À la fin de son démarrage, OBS demande le
+        premier plan ; si on utilise le PC, Windows le lui refuse et fait clignoter son bouton, puis le
+        laisse orange jusqu'à ce qu'on clique dessus. Pour un OBS que Multi OBS vient d'ouvrir, on
+        l'éteint (sauf option cochée). Ses boîtes de dialogue gardent le leur : elles attendent une
+        réponse. True si le clignotement a été éteint."""
+        if self.settings.get("obs_taskbar_flash", False):
+            return False
+        pid = winapi.window_pid(hwnd)
+        if any(c.just_launched(pid) for c in self.controllers.values()) and not winapi.is_owned(hwnd):
+            winapi.stop_flash(hwnd)
+            return True
+        return False
 
     # ------------------------------------------------------------------ #
     # Instances

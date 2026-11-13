@@ -320,6 +320,13 @@ class SettingsDialog(QDialog):
         self.taskbar_rename = QCheckBox("Barre des tâches : « OBS Blue — Caméra » avec le logo OBS à la couleur de l'instance")
         self.taskbar_rename.setChecked(bool(manager.settings.get("taskbar_rename", True)))
         form.addRow(self.taskbar_rename)
+        self.obs_flash = QCheckBox("Barre des tâches : mettre les OBS en surbrillance quand ils s'ouvrent")
+        self.obs_flash.setChecked(bool(manager.settings.get("obs_taskbar_flash", False)))
+        self.obs_flash.setToolTip("Décoché : un OBS qui vient de s'ouvrir ne reste pas orange dans la barre des "
+                                  "tâches (ses fenêtres qui attendent une réponse clignotent toujours).\n"
+                                  "Coché : comme un OBS ouvert à la main, Windows fait clignoter son bouton puis "
+                                  "le laisse orange jusqu'à ce que tu cliques dessus.")
+        form.addRow(self.obs_flash)
         general.addWidget(g)
 
         g = QGroupBox("Chat du live")
@@ -832,6 +839,7 @@ class SettingsDialog(QDialog):
         s["hotkey_pause"] = self.hk_pause.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
         s["auto_remux"] = self.auto_remux.isChecked()
         s["taskbar_rename"] = self.taskbar_rename.isChecked()
+        s["obs_taskbar_flash"] = self.obs_flash.isChecked()
         s["on_close"] = self.on_close.currentData()
         s["check_updates"] = self.check_updates.isChecked()
         s["trash_mkv_after_remux"] = self.trash_mkv.isChecked()

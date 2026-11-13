@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self.system = SystemEvents(int(self.winId()))
         QApplication.instance().installNativeEventFilter(self.system.filter)
         self.system.awayChanged.connect(lambda _a: self._schedule_context())
+        self.system.windowFlashed.connect(self.manager.quiet_launch_flash)   # OBS pas en surbrillance
         QGuiApplication.instance().applicationStateChanged.connect(lambda _s: self._schedule_context())
         self._context_timer = QTimer(self, singleShot=True, interval=120, timeout=self._update_preview_context)
         self.scroll.verticalScrollBar().valueChanged.connect(lambda _v: self._schedule_context())

@@ -420,6 +420,12 @@ class InstanceController(QObject):
             if hwnd:
                 winapi.minimize(hwnd)
 
+    def just_launched(self, pid: int) -> bool:
+        """`pid` est cet OBS, ouvert par Multi OBS il y a moins de 2 minutes (le temps qu'il
+        finisse de démarrer, même lourd et lancé avec les autres)."""
+        return (bool(self.proc) and self.proc.pid == pid and bool(self._launch_started)
+                and time.monotonic() - self._launch_started < 120)
+
     def _watch_window(self) -> None:
         if not self.proc or time.monotonic() - self._launch_started > 60:
             self._launch_timer.stop()

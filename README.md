@@ -148,6 +148,11 @@ Chaque instance porte un nom clair et le logo OBS à sa couleur, pour s'y retrou
 <img src="screenshots/07_taskbar.png" width="760" alt="Barre des tâches avec trois instances">
 </div>
 
+Un OBS qui s'ouvre ne reste pas en surbrillance orange dans la barre des tâches. Sans Multi OBS, Windows fait
+clignoter son bouton quand tu utilises le PC à ce moment-là, puis le laisse orange jusqu'à ce que tu cliques
+dessus. Pour garder ce comportement : ⚙ → **Général** → « Barre des tâches : mettre les OBS en surbrillance
+quand ils s'ouvrent ».
+
 ## Aperçu économe
 
 L'aperçu est **sans compression** (par défaut 60 images/s en 1/4) et coûte le moins possible :

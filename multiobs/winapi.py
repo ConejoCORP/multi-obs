@@ -115,6 +115,32 @@ def request_close(hwnd) -> None:
     user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
 
+def window_pid(hwnd) -> int:
+    p = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+    return p.value
+
+
+def is_owned(hwnd) -> bool:
+    """Fenêtre secondaire (boîte de dialogue…) rattachée à une fenêtre principale."""
+    return bool(user32.GetWindow(hwnd, GW_OWNER))
+
+
+class _FLASHWINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("hwnd", wintypes.HWND), ("dwFlags", wintypes.DWORD),
+                ("uCount", wintypes.UINT), ("dwTimeout", wintypes.DWORD)]
+
+
+user32.FlashWindowEx.argtypes = [ctypes.POINTER(_FLASHWINFO)]
+
+
+def stop_flash(hwnd) -> None:
+    """Éteint le clignotement d'une fenêtre (bouton orange dans la barre des tâches)."""
+    FLASHW_STOP = 0
+    info = _FLASHWINFO(ctypes.sizeof(_FLASHWINFO), hwnd, FLASHW_STOP, 0, 0)
+    user32.FlashWindowEx(ctypes.byref(info))
+
+
 class _PowerThrottling(ctypes.Structure):
     _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG), ("StateMask", wintypes.ULONG)]
 

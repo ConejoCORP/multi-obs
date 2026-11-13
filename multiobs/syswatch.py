@@ -1,5 +1,5 @@
-"""Événements Windows utiles pour économiser les ressources : session verrouillée et
-écran éteint (personne ne regarde les aperçus -> ils se mettent en pause)."""
+"""Événements Windows : session verrouillée et écran éteint (personne ne regarde les aperçus
+-> ils se mettent en pause), bouton d'une fenêtre qui clignote dans la barre des tâches."""
 import ctypes
 import uuid
 from ctypes import wintypes
@@ -10,6 +10,7 @@ WM_WTSSESSION_CHANGE = 0x02B1
 WTS_SESSION_LOCK, WTS_SESSION_UNLOCK = 0x7, 0x8
 WM_POWERBROADCAST = 0x0218
 PBT_POWERSETTINGCHANGE = 0x8013
+HSHELL_FLASH = 0x8006      # message du shell : le bouton de la fenêtre lParam clignote
 GUID_CONSOLE_DISPLAY_STATE = uuid.UUID("6FE69556-704A-47A0-8F24-C28D936FDA47")
 
 
@@ -40,17 +41,27 @@ class _Filter(QAbstractNativeEventFilter):
             setting = _POWERBROADCAST_SETTING.from_address(msg.lParam)
             if bytes(setting.PowerSetting) == GUID_CONSOLE_DISPLAY_STATE.bytes_le:
                 self.owner._set(display_off=(setting.Data == 0))  # 0 éteint, 1 allumé, 2 atténué
+        elif self.owner.shell_message and msg.message == self.owner.shell_message \
+                and msg.wParam == HSHELL_FLASH and msg.lParam:
+            self.owner.windowFlashed.emit(int(msg.lParam))
         return False, 0
 
 
 class SystemEvents(QObject):
     awayChanged = Signal(bool)
+    windowFlashed = Signal(object)   # hwnd dont le bouton clignote dans la barre des tâches
 
     def __init__(self, hwnd: int):
         super().__init__()
         self.locked = False
         self.display_off = False
         self.filter = _Filter(self)
+        # Messages que le shell envoie à la barre des tâches (fenêtre créée, activée, qui clignote…).
+        try:
+            self.shell_message = ctypes.windll.user32.RegisterWindowMessageW("SHELLHOOK")
+            ctypes.windll.user32.RegisterShellHookWindow(wintypes.HWND(hwnd))
+        except (OSError, AttributeError):
+            self.shell_message = 0
         try:
             ctypes.windll.wtsapi32.WTSRegisterSessionNotification(wintypes.HWND(hwnd), 0)
         except (OSError, AttributeError):
