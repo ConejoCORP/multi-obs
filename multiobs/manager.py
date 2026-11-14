@@ -44,6 +44,8 @@ DEFAULT_SETTINGS = {
     "chat_third_party": True,         # emotes 7TV / BTTV / FFZ de la chaîne (comme avec leurs extensions)
     "chat_animated": True,            # emotes animées
     "chat_on_top": False,             # chat_geometries : place de la fenêtre du chat de chaque instance
+    "chat_mod_icons": True,           # modération Twitch : icônes supprimer / exclure / bannir devant les messages
+    "twitch_client_id": "",           # application Twitch à soi pour la connexion (vide : celle de Multi OBS)
     "creator_in_name": True,          # décoché : les fichiers n'ont pas ton nom (enregistrements solo)
     "video_name": "",
     "filename_template": naming.DEFAULT_TEMPLATE,

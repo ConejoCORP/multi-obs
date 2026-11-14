@@ -3,6 +3,26 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.13
+
+- **Modère ton chat Twitch depuis Multi OBS**, avec les icônes du chat de Twitch devant chaque message :
+  **supprimer** le message, **exclure 10 minutes**, **bannir**. Un clic droit sur un message donne en plus les
+  autres durées d'exclusion (1 min, 10 min, 1 h, 24 h, 1 semaine), « effacer ses messages » et « lever le
+  bannissement ». Quand quelqu'un est exclu ou banni, une ligne le dit dans le chat, avec **Annuler**.
+- **Connexion à Twitch dans une fenêtre de Multi OBS, comme dans OBS** : le bouclier en haut de la fenêtre du
+  chat (ou **Personnalisé…** → Modération Twitch) ouvre la page de Twitch ; tu t'y connectes, tu cliques sur
+  « Activer » puis « Autoriser », et la fenêtre se ferme toute seule.
+  - Elle te guide en **4 étapes expliquées** : celle en cours s'allume, la fenêtre suit où tu en es dans la page.
+  - Elle dit ce que Multi OBS pourra faire ou non, et quoi faire en cas de souci : recharger la page, demander
+    un nouveau code ou passer par ton navigateur.
+  - Tu restes connecté à Twitch dans cette fenêtre pour les fois suivantes, et le chat te confirme si la
+    modération est active.
+  - Multi OBS ne lit pas ce que tu tapes sur la page, ne reçoit que les droits de modération et garde la
+    connexion chiffrée par Windows sur ton PC. Il faut être le diffuseur de la chaîne ou un de ses modérateurs :
+    le bouclier devient vert quand la modération est active.
+- **YouTube** : un clic droit sur un message YouTube → « Modérer dans le chat YouTube » ouvre le vrai chat de
+  ton live, où tu es connecté (YouTube ne permet pas de modérer simplement depuis une autre application).
+
 ## 1.1.12
 
 - **Les OBS ne restent plus en surbrillance orange dans la barre des tâches quand ils s'ouvrent.** À la fin

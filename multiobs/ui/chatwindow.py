@@ -4,8 +4,10 @@ messages, mentions de la chaîne, messages supprimés ; même police (Inter 13 p
 couleurs. YouTube dans le même style avec ses badges (propriétaire, modérateur, membre, validé).
 
 Nos ajouts : multi-chat Twitch + YouTube (un logo devant chaque message), fil d'actualité en bas, une fenêtre par
-instance du live, « Chat personnalisé ». Lecture seule (lecteurs de livechat.py, dans des threads) ; pour écrire,
-les boutons du bas ouvrent le vrai chat de chaque plateforme.
+instance du live, « Chat personnalisé ». Lecture sans compte (lecteurs de livechat.py, dans des threads) ; pour
+écrire, les boutons du bas ouvrent le vrai chat de chaque plateforme. Modération Twitch (compte du diffuseur ou d'un
+modérateur connecté, voir twitchmod.py) : icônes de Twitch devant les messages (supprimer, exclure 10 min,
+bannir) et clic droit ; YouTube se modère dans son vrai chat.
 """
 import hashlib
 import html
@@ -26,8 +28,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QMessageBox, QPushButton, QSlider, QSpinBox, QSplitter, QStyle, QStyledItemDelegate,
                                QToolButton, QToolTip, QVBoxLayout, QWidget)
 
-from .. import chatassets, livechat, paths, twitch
+from .. import chatassets, livechat, paths, twitch, twitchauth
 from ..theme import YAMI, mix
+from .twitchmod import ICON_TIMEOUT_S, TIMEOUTS, TwitchLoginDialog, duration_fr, hub, run
 from .widgets import icon
 
 MAX_ROWS = 500           # messages gardés (bien plus quand on remonte lire : rien ne saute)
@@ -42,6 +45,7 @@ NOTICE_BG = "#1F1F23"
 TWITCH_PURPLE = "#9147FF"
 HIGHLIGHT = "#755EBC"    # message mis en avant (points de chaîne)
 MENTION = "#E91916"      # message qui mentionne la chaîne
+ERROR = "#F2617A"        # ligne de Multi OBS : action de modération impossible
 FIRST = ("#00F593", "#57BEE6")
 ANNOUNCE = {"PRIMARY": ("#9147FF", "#9147FF"), "BLUE": ("#00D6D6", "#9146FF"), "GREEN": ("#00DB84", "#57BEE6"),
             "ORANGE": ("#FFB31A", "#E0E000"), "PURPLE": ("#9146FF", "#FF75E6")}
@@ -62,6 +66,8 @@ CHAT_MODES = [("twitch", "Chat Twitch", "twitch.svg"), ("youtube", "Chat YouTube
 FEED_NOTE = ("Les follows Twitch et les nouveaux abonnés YouTube ne passent pas par le chat : « Flux Twitch "
              "complet » (en haut du fil) ouvre le flux d'activité de Twitch, avec ton compte connecté dans Chrome "
              "ou Edge.")
+MOD_NOTE = ("Compte du diffuseur ou d'un de ses modérateurs. Clic droit sur un message Twitch : autres durées, "
+            "lever un bannissement. YouTube : clic droit sur un message → « Modérer dans le chat YouTube ».")
 URL_RE = re.compile(r"^(https?://|www\.)\S+$", re.IGNORECASE)
 
 
@@ -208,7 +214,9 @@ class ImageStore(QObject):
         self._tick = QTimer(self, interval=40, timeout=self._emit_tick)
         self._loaded.connect(self._on_loaded)
         for key, name in (("logo:twitch", "twitch.svg"), ("logo:youtube", "youtube.svg"),
-                          ("icon:moderator", "yt_moderator.svg"), ("icon:verified", "yt_verified.svg")):
+                          ("icon:moderator", "yt_moderator.svg"), ("icon:verified", "yt_verified.svg"),
+                          ("icon:mod_delete", "mod_delete.svg"), ("icon:mod_timeout", "mod_timeout.svg"),
+                          ("icon:mod_ban", "mod_ban.svg")):
             self.images[key] = icon(name).pixmap(64, 64).toImage()
 
     def get(self, url: str) -> QImage:
@@ -427,6 +435,8 @@ class MessageDelegate(QStyledItemDelegate):
             tip = ""
             if a.startswith("t:") and a[2:].isdigit() and int(a[2:]) < len(row.tips):
                 tip = row.tips[int(a[2:])]
+            elif a.startswith("mod:"):
+                tip = self.win.mod_tip(row, a[4:])
             elif a.startswith(("http://", "https://")):
                 tip = a
             if tip:
@@ -437,13 +447,16 @@ class MessageDelegate(QStyledItemDelegate):
         return super().helpEvent(event, view, option, index)
 
     def editorEvent(self, event, model, option, index):
-        """Clic sur un lien du chat : il s'ouvre dans le navigateur."""
+        """Clic sur un lien du chat : il s'ouvre dans le navigateur ; sur une icône de modération : l'action."""
         if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
             row = index.data(ROW)
             if row is not None:
                 a = self._anchor(row, option.rect, event.position())
                 if a.startswith(("http://", "https://")):
                     QDesktopServices.openUrl(QUrl(a))
+                    return True
+                if a.startswith("mod:"):
+                    self.win.moderate(row, a[4:])
                     return True
         return False
 
@@ -470,6 +483,17 @@ class ChatList(QListView):
 
     def relayout(self) -> None:
         self.scheduleDelayedItemsLayout()
+
+    def mouseMoveEvent(self, e):
+        """Main sur les liens et les icônes de modération (cliquables), flèche ailleurs."""
+        super().mouseMoveEvent(e)
+        index = self.indexAt(e.position().toPoint())
+        delegate = self.itemDelegate()
+        hand = False
+        if index.isValid() and isinstance(delegate, MessageDelegate):
+            a = delegate._anchor(index.data(ROW), self.visualRect(index), e.position())
+            hand = a.startswith(("http://", "https://", "mod:"))
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.ArrowCursor)
 
     def paintEvent(self, e):
         super().paintEvent(e)
@@ -592,6 +616,15 @@ class ChatWindow(QWidget):
         self._seq = 0
         self._unread = 0
         self._split_ready = False
+        self.mod_hub = hub()                 # compte Twitch connecté (commun à toutes les fenêtres du chat)
+        self.mod_hub.set_client_id(settings.get("twitch_client_id", ""))
+        self.mod_role = ""                   # « broadcaster » / « mod » : on peut modérer ce chat Twitch
+        self.mod_note = ""
+        self.mod_btn = None
+        self._mod_check = 0
+        self._me_id = ""
+        self._local = 0
+        self._login_seen = 0.0               # connexion déjà annoncée dans le chat
         self._flush = QTimer(self, singleShot=True, interval=80, timeout=self._flush_queue)
         self._apply_font(int(settings.get("chat_font_px", BASE_PX)))
         self._events = feed_events(settings)
@@ -609,6 +642,10 @@ class ChatWindow(QWidget):
             chip.clicked.connect(lambda p=p: self._change_link(p))
             hl.addWidget(chip)
         hl.addStretch(1)
+        if "twitch" in self.platforms:   # modération Twitch : connexion, état, déconnexion
+            self.mod_btn = self._tool("Modération Twitch", "shield.svg")
+            self.mod_btn.clicked.connect(self._mod_clicked)
+            hl.addWidget(self.mod_btn)
         for text, tip, step in (("A−", "Texte plus petit", -1), ("A+", "Texte plus grand", 1)):
             b = self._tool(tip)
             b.setText(text)
@@ -690,9 +727,9 @@ class ChatWindow(QWidget):
         fl = QHBoxLayout(foot)
         fl.setContentsMargins(10, 5, 6, 5)
         fl.setSpacing(6)
-        hint = QLabel("Lecture seule · pour écrire :")
-        hint.setProperty("muted", True)
-        fl.addWidget(hint)
+        self.hint = QLabel("Lecture seule · pour écrire :")
+        self.hint.setProperty("muted", True)
+        fl.addWidget(self.hint)
         fl.addStretch(1)
         for p in self.platforms:
             b = QPushButton(icon(f"{p}.svg"), f"Chat {NAMES[p]}")
@@ -707,6 +744,9 @@ class ChatWindow(QWidget):
             self.resize(440, 760)
         self.apply_settings()
         self.start_readers()
+        self.mod_hub.changed.connect(self._mod_refresh)
+        self.mod_hub.display.connect(self._relayout_all)
+        self._mod_refresh()
 
     def set_name(self, name: str) -> None:
         """Titre : le chat et l'instance (« Chat Twitch — OBS Purple »), pour s'y retrouver à plusieurs."""
@@ -786,6 +826,9 @@ class ChatWindow(QWidget):
             link = self._link(p)
             if p == "youtube":
                 self.youtube_video = ""
+            elif self._room:   # autre chaîne peut-être : badges, emotes et droits de modération à revoir
+                self._room = ""
+                self._mod_refresh()
             if not link:
                 self._set_status(p, "off", "non configuré — clique pour indiquer ta chaîne")
                 continue
@@ -824,6 +867,7 @@ class ChatWindow(QWidget):
             if ev[2] != self._room:
                 self._room = ev[2]
                 self._assets.start(ev[3], ev[2])
+                self._mod_refresh()
         elif kind == "message":
             msg = ev[1]
             key = (msg.platform, msg.id)
@@ -838,6 +882,10 @@ class ChatWindow(QWidget):
                 self._flush.start()
         elif kind in ("delete", "delete_author", "clear"):
             self._delete(kind, ev[1], ev[2] if len(ev) > 2 else "")
+            if kind == "delete_author" and len(ev) > 4 and self.mod_role:   # vu par les modérateurs, comme Twitch
+                self._ban_notice(ev[2], ev[3], ev[4])
+            elif kind == "clear" and ev[1] == "twitch":
+                self._notice("Le chat a été effacé par un modérateur.")
 
     def _on_assets(self, data: dict) -> None:
         self.badges, self.emotes = data["badges"], data["emotes"]
@@ -894,7 +942,7 @@ class ChatWindow(QWidget):
         at_end, changed = self._at_end(), False
         for i, row in enumerate(self.model.rows):
             m = row.msg
-            if m.platform != platform or row.deleted:
+            if m.platform != platform or row.deleted or m.notice == "local":
                 continue
             if (kind == "delete" and m.id == target) or (kind == "delete_author" and m.author_key == target) \
                     or kind == "clear":
@@ -1053,6 +1101,12 @@ class ChatWindow(QWidget):
         def tip(text: str) -> int:
             row.tips.append(text)
             return len(row.tips) - 1
+        if m.notice == "local":   # ligne de Multi OBS (modération, chat effacé), en gris comme celles de Twitch
+            logo = (f'{self._img("logo:twitch", self.logo_px, self.logo_px, None)}&nbsp;'
+                    if len(self.platforms) > 1 else "")
+            who = f'<span style="font-weight:700">{_esc(m.author)}</span> ' if m.author else ""
+            undo = (f' <a href="mod:unban" style="color:{LINK}">Annuler</a>' if m.user_id and self.mod_role else "")
+            return f'<div style="color:{m.accent or MUTED}">{logo}{who}{_esc(m.label)}{undo}</div>'
         lines = []
         head = self._header_html(row)
         if head:
@@ -1071,7 +1125,7 @@ class ChatWindow(QWidget):
             if lines:   # abonnement, raid… sans message : la phrase de Twitch suffit
                 lines[0] = logo + lines[0]
         else:
-            badges = self._badges_html(m, tip)
+            badges = self._mod_html(row) + self._badges_html(m, tip)
             name = self._name_html(row)
             if row.deleted:
                 line = f'{name}<span style="color:{TEXT}">: </span><span style="color:{MUTED}">&lt;message supprimé&gt;</span>'
@@ -1083,6 +1137,173 @@ class ChatWindow(QWidget):
                 line = name
             lines.append(logo + badges + line)
         return f'<div style="color:{TEXT}">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
+
+    # ------------------------------------------------------------------ modération Twitch
+    def _mod_refresh(self, fresh: bool = False) -> None:
+        """Le compte Twitch connecté peut-il modérer cette chaîne ? (début du chat, connexion, déconnexion)"""
+        if "twitch" not in self.platforms:
+            return
+        self._mod_check += 1
+        check = self._mod_check
+        acc = self.mod_hub.account()
+        channel = self._link("twitch")
+        if acc is None:
+            self._set_mod("", "Modération Twitch : clique pour connecter ton compte (diffuseur ou modérateur)")
+            return
+        room = self._room
+        if not room or not channel:
+            self._set_mod("", f"Modération Twitch : connecté ({acc['login']}), en attente du chat…")
+            return
+        self._set_mod(self.mod_role, f"Modération Twitch : vérification des droits de {acc['login']} sur "
+                                     f"#{channel}…")
+        run(self, lambda: self.mod_hub.session.role_in(room, fresh),
+            lambda role, e: self._mod_checked(check, acc, channel, role, e))
+
+    def _mod_checked(self, check: int, acc: dict, channel: str, role, error) -> None:
+        if check != self._mod_check:
+            return
+        if isinstance(error, twitchauth.NeedLogin):
+            self.mod_hub.lost(error)   # toutes les fenêtres passent à « pas connecté »
+            return
+        if error is not None:
+            self._set_mod("", f"Modération Twitch indisponible : {error} (menu : « Vérifier à nouveau »)")
+            return
+        self._me_id = acc["user_id"]
+        if role:
+            who = "diffuseur" if role == "broadcaster" else "modérateur"
+            self._set_mod(role, f"Modération Twitch active : {acc['login']} ({who} de #{channel})")
+        else:
+            self._set_mod("", f"Modération Twitch : {acc['login']} n'est pas modérateur de #{channel}")
+        login_at = self.mod_hub.login_at
+        if login_at and login_at != self._login_seen and time.monotonic() - login_at < 120:
+            self._login_seen = login_at   # tout juste connecté : le chat dit ce qui marche, ou pourquoi pas
+            if role:
+                self._notice(f"Modération Twitch active avec le compte {acc['login']} : icônes à côté des messages "
+                             "(supprimer, exclure 10 min, bannir), clic droit pour les autres choix.")
+            else:
+                self._notice(f"Le compte {acc['login']} n'est pas modérateur de #{channel} : connecte le compte du "
+                             "diffuseur ou d'un de ses modérateurs (bouclier en haut → Se déconnecter, puis "
+                             "reconnecte-toi).", error=True)
+
+    def _set_mod(self, role: str, note: str) -> None:
+        changed = role != self.mod_role
+        self.mod_role, self.mod_note = role, note
+        if self.mod_btn is not None:
+            self.mod_btn.setIcon(icon("shield_on.svg" if role else "shield.svg"))
+            self.mod_btn.setToolTip(note)
+        self.hint.setText("Pour écrire :" if role else "Lecture seule · pour écrire :")
+        if changed:   # icônes de modération à ajouter ou enlever
+            self._relayout_all()
+
+    def _mod_clicked(self) -> None:
+        acc = self.mod_hub.account()
+        if acc is None:
+            self.login_twitch()
+            return
+        menu = QMenu(self)
+        a = menu.addAction(icon("twitch.svg"), f"Connecté à Twitch : {acc['login']}")
+        a.setEnabled(False)
+        a = menu.addAction(self.mod_note.replace("Modération Twitch : ", "").replace("Modération Twitch ", ""))
+        a.setEnabled(False)
+        menu.addSeparator()
+        icons_on = menu.addAction("Icônes de modération à côté des messages")
+        icons_on.setCheckable(True)
+        icons_on.setChecked(bool(self.settings.get("chat_mod_icons", True)))
+        icons_on.toggled.connect(self._set_mod_icons)
+        menu.addAction(icon("refresh.svg"), "Vérifier à nouveau mes droits", lambda: self._mod_refresh(True))
+        menu.addSeparator()
+        menu.addAction("Se déconnecter de Twitch", self.mod_hub.logout)
+        menu.exec(self.mod_btn.mapToGlobal(self.mod_btn.rect().bottomLeft()))
+
+    def _set_mod_icons(self, on: bool) -> None:
+        self.settings["chat_mod_icons"] = on
+        self._save()
+        self.mod_hub.display.emit()   # toutes les fenêtres du chat
+
+    def login_twitch(self) -> None:
+        TwitchLoginDialog(self.settings, self._save, self).exec()
+
+    def _can_act(self, m) -> bool:
+        """Peut-on exclure ou bannir l'auteur ? Pas le diffuseur, un modérateur, le staff de Twitch, ni soi-même."""
+        if not self.mod_role or m.platform != "twitch" or m.notice == "local" or not m.user_id:
+            return False
+        if m.user_id == self._me_id or m.role in ("owner", "mod"):
+            return False
+        return not any(b[0] in ("staff", "admin", "global_mod") for b in m.badges)
+
+    @staticmethod
+    def _deletable(m) -> bool:
+        """Message qu'on peut supprimer (un vrai message du chat, avec son id de Twitch)."""
+        return bool(m.id) and not m.id.startswith("tw-") and m.notice in ("", "highlighted-message")
+
+    def _mod_html(self, row: Row) -> str:
+        """Icônes de modération du chat de Twitch devant le message : supprimer, exclure 10 min, bannir."""
+        m = row.msg
+        if not self.settings.get("chat_mod_icons", True) or not self._can_act(m):
+            return ""
+        size = self.badge_px
+        acts = ([("del", "mod_delete")] if self._deletable(m) and not row.deleted else []) + \
+            [("to", "mod_timeout"), ("ban", "mod_ban")]
+        return "".join(f'<a href="mod:{a}"><img src="icon:{name}" width="{size}" height="{size}" '
+                       f'style="vertical-align: middle"></a>&#8202;' for a, name in acts) + "&#8201;"
+
+    def mod_tip(self, row: Row, action: str) -> str:
+        name = row.msg.author or row.msg.login
+        return {"del": "Supprimer le message", "to": f"Exclure {name} 10 minutes (clic droit : autres durées)",
+                "ban": f"Bannir {name}", "unban": f"Lever le bannissement ou l'exclusion de {name}"}.get(action, "")
+
+    def moderate(self, row: Row, action: str, seconds: int = ICON_TIMEOUT_S) -> None:
+        """Supprimer (del), exclure (to, seconds), bannir (ban) ou lever (unban), avec le compte connecté.
+        Réussi : Twitch le montre lui-même (message supprimé, « … a été banni(e) ») ; raté : ligne d'erreur."""
+        m = row.msg
+        room = m.room_id or self._room
+        if not self.mod_role or not room:
+            return
+        session, name = self.mod_hub.session, m.author or m.login
+        if action == "del" and self._deletable(m):
+            fn, what = (lambda: session.delete_message(room, m.id)), "supprimer ce message"
+        elif action == "to" and m.user_id:
+            fn, what = (lambda: session.ban(room, m.user_id, seconds)), f"exclure {name}"
+        elif action == "ban" and m.user_id:
+            fn, what = (lambda: session.ban(room, m.user_id)), f"bannir {name}"
+        elif action == "unban" and m.user_id:
+            fn, what = (lambda: session.unban(room, m.user_id)), f"lever le bannissement de {name}"
+        else:
+            return
+        user_id = m.user_id
+        run(self, fn, lambda _r, e: self._moderated(action, name, user_id, what, e))
+
+    def _moderated(self, action: str, name: str, user_id: str, what: str, error) -> None:
+        if error is None:
+            if action == "unban":   # Twitch n'envoie rien au chat : on le dit, et « Annuler » disparaît
+                for i, row in enumerate(self.model.rows):
+                    if row.msg.notice == "local" and row.msg.user_id == user_id:
+                        row.msg.user_id = ""
+                        self.delegate.forget([row])
+                        self.model.touch(i)
+                self._notice("n'est plus banni(e) ni exclu(e).", who=name)
+            return
+        self.mod_hub.lost(error)
+        text = str(error)
+        self._notice(f"Impossible de {what} : {text}{'' if text.endswith('.') else '.'}", error=True)
+
+    def _notice(self, text: str, error: bool = False, who: str = "", user_id: str = "") -> None:
+        """Ligne de Multi OBS dans le chat : résultat d'une action de modération, chat effacé…"""
+        self._local += 1
+        msg = livechat.ChatMessage("twitch", f"local-{self._local}", who)
+        msg.notice, msg.label, msg.system = "local", text, True
+        msg.accent = ERROR if error else ""
+        msg.user_id, msg.room_id = user_id, self._room
+        self._queue.append(msg)
+        if not self._flush.isActive():
+            self._flush.start()
+
+    def _ban_notice(self, login: str, seconds: int, user_id: str) -> None:
+        """« X a été exclu(e) pendant 10 minutes. Annuler » / « X a été banni(e) définitivement. Annuler »."""
+        name = next((r.msg.author for r in reversed(self.model.rows)
+                     if r.msg.login == login and r.msg.notice != "local"), login)
+        text = f"a été exclu(e) pendant {duration_fr(seconds)}." if seconds else "a été banni(e) définitivement."
+        self._notice(text, who=name, user_id=user_id)
 
     def feed_html(self, row: Row) -> str:
         """Ligne du fil : « pseudo · quoi · heure », puis le message éventuel."""
@@ -1189,7 +1410,26 @@ class ChatWindow(QWidget):
         if not index.isValid():
             return
         row = index.data(ROW)
+        m = row.msg
         menu = QMenu(self)
+        if self._can_act(m):   # modération Twitch, comme la carte d'utilisateur de Twitch
+            if self._deletable(m) and not row.deleted:
+                menu.addAction(icon("mod_delete.svg"), "Supprimer le message", lambda: self.moderate(row, "del"))
+            sub = menu.addMenu(icon("mod_timeout.svg"), f"Exclure {m.author}")
+            for seconds, label in TIMEOUTS:
+                sub.addAction(label, lambda s=seconds: self.moderate(row, "to", s))
+            sub.addSeparator()
+            sub.addAction("Effacer ses messages (exclusion d'une seconde)", lambda: self.moderate(row, "to", 1))
+            menu.addAction(icon("mod_ban.svg"), f"Bannir {m.author}", lambda: self.moderate(row, "ban"))
+            menu.addAction(f"Lever le bannissement ou l'exclusion de {m.author}", lambda: self.moderate(row, "unban"))
+            menu.addSeparator()
+        elif m.notice == "local" and m.user_id and self.mod_role:
+            menu.addAction(f"Lever le bannissement ou l'exclusion de {m.author}", lambda: self.moderate(row, "unban"))
+            menu.addSeparator()
+        elif m.platform == "youtube":
+            menu.addAction(icon("youtube.svg"), "Modérer dans le chat YouTube",
+                           lambda: self._open_native("youtube", self.youtube_video))
+            menu.addSeparator()
         menu.addAction("Copier le message", lambda: QApplication.clipboard().setText(row.msg.text() or row.msg.label))
         menu.addAction("Copier le pseudo", lambda: QApplication.clipboard().setText(row.msg.author))
         menu.exec(view.viewport().mapToGlobal(pos))
@@ -1202,6 +1442,11 @@ class ChatWindow(QWidget):
 
     def closeEvent(self, e):
         self.stop()
+        for signal, slot in ((self.mod_hub.changed, self._mod_refresh), (self.mod_hub.display, self._relayout_all)):
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
         s = self.settings
         geos = s.get("chat_geometries")
         if not isinstance(geos, dict):
@@ -1222,9 +1467,9 @@ class ChatSettingsDialog(QDialog):
     """« Chat personnalisé » : ce que le bouton Chat de l'instance ouvre (mode, propre à chaque instance du live),
     et pour toutes les fenêtres du chat : les chaînes, le fil d'actualité, le texte et les emotes."""
 
-    def __init__(self, settings: dict, parent=None, mode: str = "twitch", name: str = ""):
+    def __init__(self, settings: dict, parent=None, mode: str = "twitch", name: str = "", save=None):
         super().__init__(parent)
-        self.settings = settings
+        self.settings, self._save = settings, save
         self.setWindowTitle(f"Chat personnalisé — {name}" if name else "Chat personnalisé")
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         lay = QVBoxLayout(self)
@@ -1307,12 +1552,59 @@ class ChatSettingsDialog(QDialog):
         form.addRow(self.on_top)
         lay.addWidget(g)
 
+        g = QGroupBox("Modération Twitch")
+        gl = QVBoxLayout(g)
+        row = QHBoxLayout()
+        self.mod_state = QLabel()
+        row.addWidget(self.mod_state, 1)
+        self.mod_login = QPushButton()
+        self.mod_login.clicked.connect(self._mod_login_clicked)
+        row.addWidget(self.mod_login)
+        gl.addLayout(row)
+        self.mod_icons = QCheckBox("Icônes de modération à côté des messages")
+        self.mod_icons.setToolTip("Comme sur Twitch : supprimer le message, exclure 10 minutes, bannir")
+        self.mod_icons.setChecked(bool(settings.get("chat_mod_icons", True)))
+        gl.addWidget(self.mod_icons)
+        note = QLabel(MOD_NOTE)
+        note.setProperty("muted", True)
+        note.setWordWrap(True)
+        note.setMinimumHeight(round(note.fontMetrics().lineSpacing() * 3.3))   # 3 lignes (texte replié)
+        gl.addWidget(note)
+        lay.addWidget(g)
+        self._hub = hub()
+        self._hub.changed.connect(self._mod_state_refresh)
+        self._mod_state_refresh()
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
         self.setMinimumWidth(520)
+
+    def _mod_state_refresh(self) -> None:
+        acc = self._hub.account()
+        if acc is None:
+            self.mod_state.setText("Pas connecté à Twitch")
+            self.mod_login.setText("Se connecter à Twitch…")
+            self.mod_login.setIcon(icon("twitch.svg"))
+        else:
+            self.mod_state.setText(f"Connecté à Twitch : <b>{html.escape(acc['login'])}</b>")
+            self.mod_login.setText("Se déconnecter")
+            self.mod_login.setIcon(icon("link-off.svg"))
+
+    def _mod_login_clicked(self) -> None:
+        if self._hub.account() is None:
+            TwitchLoginDialog(self.settings, self._save, self).exec()
+        else:
+            self._hub.logout()
+
+    def done(self, r: int) -> None:
+        try:
+            self._hub.changed.disconnect(self._mod_state_refresh)
+        except (RuntimeError, TypeError):
+            pass
+        super().done(r)
 
     def accept(self) -> None:
         tw, yt = self.twitch.text().strip(), self.youtube.text().strip()
@@ -1334,4 +1626,5 @@ class ChatSettingsDialog(QDialog):
         s["chat_third_party"] = self.third_party.isChecked()
         s["chat_animated"] = self.animated.isChecked()
         s["chat_on_top"] = self.on_top.isChecked()
+        s["chat_mod_icons"] = self.mod_icons.isChecked()
         super().accept()

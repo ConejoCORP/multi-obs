@@ -7,8 +7,9 @@
 Les lecteurs tournent dans des threads et appellent emit(…) avec un événement : ("status", plateforme, état,
 texte), ("live", "youtube", id de la vidéo), ("room", "twitch", id de la chaîne, pseudo),
 ("message", ChatMessage), ("delete", plateforme, id),
-("delete_author", plateforme, auteur), ("clear", plateforme). Le multi-chat est en lecture seule : pour écrire,
-on ouvre le vrai chat de la plateforme.
+("delete_author", plateforme, auteur[, durée de l'exclusion en s (0 : banni), id Twitch de la personne]),
+("clear", plateforme). Le chat se lit sans compte ; pour écrire, on ouvre le vrai chat de la plateforme ; pour
+modérer Twitch, voir twitchauth.py.
 """
 import json
 import random
@@ -68,6 +69,7 @@ class ChatMessage:
     bits: int = 0
     first: bool = False           # premier message de cette personne sur la chaîne
     reward: bool = False          # récompense de points de chaîne (avec message)
+    user_id: str = ""             # Twitch : id de la personne (pour l'exclure ou la bannir)
 
     def text(self) -> str:
         return "".join(p[1] if p[0] == "text" else p[2] for p in self.parts)
@@ -167,6 +169,7 @@ def _twitch_message(tags: dict, prefix: str, text: str) -> ChatMessage:
     msg.badge_info = dict(_badge_list(tags.get("badge-info", "")))
     msg.login = login
     msg.room_id = tags.get("room-id", "")
+    msg.user_id = tags.get("user-id", "")
     if tags.get("reply-parent-msg-id"):
         parent_login = tags.get("reply-parent-user-login", "")
         msg.reply = (tags.get("reply-parent-display-name") or parent_login, tags.get("reply-parent-msg-body", ""))
@@ -247,8 +250,12 @@ def twitch_event(line: str):
         return ("message", msg)
     if cmd == "CLEARMSG" and tags.get("target-msg-id"):
         return ("delete", "twitch", tags["target-msg-id"])
-    if cmd == "CLEARCHAT":
-        return ("delete_author", "twitch", text.strip().lower()) if text else ("clear", "twitch")
+    if cmd == "CLEARCHAT":   # exclusion (ban-duration en s) ou bannissement d'une personne, ou chat effacé
+        if not text:
+            return ("clear", "twitch")
+        duration = tags.get("ban-duration", "")
+        return ("delete_author", "twitch", text.strip().lower(), int(duration) if duration.isdigit() else 0,
+                tags.get("target-user-id", ""))
     return None
 
 

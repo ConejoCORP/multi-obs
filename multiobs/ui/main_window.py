@@ -664,7 +664,8 @@ class MainWindow(QMainWindow):
         s = self.manager.settings
         before = (s.get("twitch_channel", ""), s.get("youtube_channel", ""))
         win = self._chat_windows.get(inst_id)
-        dlg = ChatSettingsDialog(s, win if win is not None else self, self.chat_mode(inst), inst.name)
+        dlg = ChatSettingsDialog(s, win if win is not None else self, self.chat_mode(inst), inst.name,
+                                 self.manager.save)
         if not dlg.exec():
             return
         self._set_chat_mode(inst, dlg.mode.currentData())
