@@ -32,6 +32,7 @@ DEFAULT_SETTINGS = {
     "hotkey_record": "Ctrl+Alt+R",
     "hotkey_pause": "Ctrl+Alt+P",
     "vcam_scope": vcam.SCOPE_USER,
+    "vcam_admin": False,              # caméras aussi pour tout le PC : logiciels lancés en admin (TikTok LIVE Studio)
     "current_preset": "",
     "creator": "",
     "twitch_channel": "",             # lien de la chaîne Twitch : bouton « Chat Twitch » sur l'OBS du live
@@ -353,6 +354,35 @@ class Manager(QObject):
     def vcam_names(self) -> dict[int, str]:
         """{numéro de caméra: nom dans Windows} — « VCam Rouge », « VCam Bleu »…"""
         return vcam.display_names(self.instances)
+
+    def vcam_admin_pending(self) -> tuple[list[int], list[int]]:
+        """Caméras pour les logiciels lancés en administrateur : (à installer ou mettre à jour, à retirer)."""
+        if not self.settings.get("vcam_admin") or self.settings.get("vcam_scope") == "none":
+            return [], []
+        return vcam.admin_pending(self.vcam_names())
+
+    def install_vcam_admin(self) -> list[int] | None:
+        """Installe / met à jour les caméras pour tout le PC (une demande d'autorisation de Windows).
+        Renvoie les caméras en échec, ou None si l'autorisation a été refusée."""
+        names = self.vcam_names()
+        try:
+            failed = vcam.install_admin(names, {i.vcam: i.color for i in self.instances})
+        except vcam.ElevationCancelled:
+            applog.log("Caméras pour les logiciels admin : autorisation de Windows refusée")
+            return None
+        applog.log("Caméras pour les logiciels admin : " + (f"échec pour {failed}" if failed else
+                                                             f"à jour ({sorted(names.values())})"))
+        return failed
+
+    def remove_vcam_admin(self) -> bool | None:
+        """Retire les caméras pour tout le PC. None si l'autorisation de Windows a été refusée."""
+        try:
+            ok = vcam.uninstall_admin()
+        except vcam.ElevationCancelled:
+            applog.log("Caméras pour les logiciels admin : retrait refusé (autorisation de Windows)")
+            return None
+        applog.log("Caméras pour les logiciels admin : " + ("retirées" if ok else "retrait incomplet"))
+        return ok
 
     def update_obs(self, progress) -> None:
         """Recopie OBS (après une mise à jour) et reconstruit toutes les instances."""

@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         self._quit_timer: QTimer | None = None
         self.status_obs = QLabel()
         self.status_vcam = QLabel()
+        self.status_vcam.setTextFormat(Qt.TextFormat.RichText)
+        self.status_vcam.linkActivated.connect(lambda _l: self.update_vcam_admin())
         self.status_hotkeys = QLabel()
         self.deck_status = DeckStatus(self)
         sb = self.statusBar()
@@ -925,6 +927,7 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.manager.update_instance(dlg.result_definition())
             self.repair_vcams()   # couleur changée : la caméra virtuelle change de nom tout de suite
+            self.offer_vcam_admin_update()
 
     def delete_instance(self, inst_id: str) -> None:
         inst = next(i for i in self.manager.instances if i.id == inst_id)
@@ -939,6 +942,79 @@ class MainWindow(QMainWindow):
             f"Tes enregistrements vidéo ne sont pas touchés.")
         if r == QMessageBox.StandardButton.Yes:
             self.manager.remove_instance(inst_id)
+            self.refresh_status()
+            self.offer_vcam_admin_update()
+
+    # ------------------------------------------------------------------ #
+    # Caméras pour les logiciels lancés en administrateur (TikTok LIVE Studio…)
+    # ------------------------------------------------------------------ #
+    def offer_vcam_admin_update(self) -> None:
+        """Après un changement de couleur ou d'instance : propose de mettre à jour les caméras pour tout le PC."""
+        add, drop = self.manager.vcam_admin_pending()
+        if add or drop:
+            self.update_vcam_admin()
+
+    def update_vcam_admin(self, ask: bool = True, on_done=None) -> None:
+        """Installe ou met à jour les caméras pour les logiciels lancés en administrateur.
+        on_done(résultat) : liste des caméras en échec, ou None si l'autorisation de Windows a été refusée."""
+        if getattr(self, "_vcam_admin_busy", False):
+            return
+        if ask:
+            add, drop = self.manager.vcam_admin_pending()
+            names = self.manager.vcam_names()
+            what = ", ".join(names.get(n, f"VCam {n}") for n in add)
+            r = QMessageBox.question(
+                self, APP_NAME,
+                "Mettre à jour les caméras virtuelles pour les logiciels lancés en administrateur "
+                "(TikTok LIVE Studio…) ?\n\n"
+                + (f"À mettre à jour : {what}.\n" if what else "")
+                + ("Caméra d'une instance supprimée à retirer.\n" if drop else "")
+                + "\nWindows va demander l'autorisation pour « Windows PowerShell » : c'est Multi OBS qui copie "
+                "ses caméras dans Program Files, comme OBS le fait pour la sienne.")
+            if r != QMessageBox.StandardButton.Yes:
+                return
+        self._vcam_admin_busy = True
+
+        def done(failed):
+            self._vcam_admin_busy = False
+            self.refresh_status()
+            if on_done:
+                on_done(failed)
+                return
+            if failed is None:
+                QMessageBox.information(self, APP_NAME, "Autorisation refusée : rien n'a changé.\n\nTu peux "
+                                        "réessayer avec le lien en bas de la fenêtre.")
+            elif failed:
+                names = self.manager.vcam_names()
+                QMessageBox.warning(self, APP_NAME, "Échec pour : "
+                                    + ", ".join(names.get(n, f"VCam {n}") for n in failed)
+                                    + "\n\nRéessaie avec le lien en bas de la fenêtre (détails dans le journal).")
+            else:
+                QMessageBox.information(self, APP_NAME, "Caméras virtuelles à jour pour les logiciels lancés "
+                                        "en administrateur.\n\nRedémarre TikTok LIVE Studio (ou l'appli) pour "
+                                        "voir les changements.")
+
+        def error(message):
+            self._vcam_admin_busy = False
+            self.refresh_status()
+            applog.log(f"Caméras pour les logiciels admin : erreur ({message})")
+            if on_done:
+                on_done([-1])   # signalé par l'appelant
+                return
+            QMessageBox.warning(self, APP_NAME, f"Caméras pour les logiciels admin : {message}")
+
+        run_task(self, "Caméras pour les logiciels admin", lambda _p: self.manager.install_vcam_admin(),
+                 on_done=done, on_error=error)
+
+    def remove_vcam_admin(self, on_done=None) -> None:
+        """Retire les caméras pour tout le PC. on_done(True / False / None si autorisation refusée)."""
+        def done(ok):
+            self.refresh_status()
+            if on_done:
+                on_done(ok)
+
+        run_task(self, "Caméras pour les logiciels admin", lambda _p: self.manager.remove_vcam_admin(),
+                 on_done=done, on_error=lambda m: (done(False), QMessageBox.warning(self, APP_NAME, m)))
 
     # ------------------------------------------------------------------ #
     # Préconfigs
@@ -1080,7 +1156,18 @@ class MainWindow(QMainWindow):
         self.status_obs.setText(txt)
         insts = self.manager.instances
         ok = sum(1 for i in insts if vcam.is_registered(i.vcam))
-        self.status_vcam.setText(f"Caméras virtuelles : {ok}/{len(insts)} installées" if insts else "")
+        txt = f"Caméras virtuelles : {ok}/{len(insts)} installées" if insts else ""
+        if insts and self.manager.settings.get("vcam_admin"):
+            add, drop = self.manager.vcam_admin_pending()
+            if add or drop:
+                txt += (" · <a href=\"admin\">à mettre à jour pour les logiciels lancés en administrateur "
+                        "(TikTok LIVE Studio…)</a>")
+                self.status_vcam.setToolTip("Clique pour mettre à jour : Windows demandera l'autorisation "
+                                            "(« Windows PowerShell »)")
+            else:
+                txt += " · aussi pour les logiciels lancés en administrateur"
+                self.status_vcam.setToolTip("")
+        self.status_vcam.setText(txt)
 
     def apply_remote(self) -> None:
         """Démarre ou arrête le serveur local du plugin Stream Deck, selon les paramètres."""

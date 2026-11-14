@@ -563,6 +563,25 @@ class SettingsDialog(QDialog):
         row.addStretch(1)
         gl.addLayout(row)
         vcams.addWidget(g)
+
+        g = QGroupBox("Logiciels lancés en administrateur (TikTok LIVE Studio…)")
+        gl = QVBoxLayout(g)
+        self.vcam_admin = QCheckBox("Rendre les caméras visibles aussi par les logiciels lancés en administrateur")
+        self.vcam_admin.setChecked(bool(manager.settings.get("vcam_admin", False)))
+        self.vcam_admin.toggled.connect(self._toggle_vcam_admin)
+        gl.addWidget(self.vcam_admin)
+        info = QLabel("Certains logiciels, comme <b>TikTok LIVE Studio</b>, se lancent toujours en administrateur. "
+                      "Windows ne leur montre alors que les caméras installées pour tout le PC, comme « OBS Virtual "
+                      "Camera » : pas celles de Multi OBS, installées pour ton compte.<br><br>"
+                      "Cette option installe aussi les caméras de Multi OBS pour tout le PC, dans Program Files "
+                      "(comme OBS). Windows demande l'autorisation pour « Windows PowerShell » : en cochant la case, "
+                      "puis quand une caméra change (nouvelle couleur, instance ajoutée ou supprimée, mise à jour "
+                      "d'OBS). Multi OBS te le propose à ce moment-là, ou avec le lien en bas de sa fenêtre.")
+        info.setWordWrap(True)
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setProperty("muted", True)
+        gl.addWidget(info)
+        vcams.addWidget(g)
         vcams.addStretch(1)
 
         # ---- Raccourcis
@@ -768,10 +787,14 @@ class SettingsDialog(QDialog):
             self.update_btn.setToolTip("Éteins d'abord toutes les instances.")
         lines = []
         names = self.manager.vcam_names()
+        admin = bool(self.manager.settings.get("vcam_admin")) and self.manager.settings.get("vcam_scope") != "none"
         for inst in self.manager.instances:
             scope = vcam.registered_scope(inst.vcam)
             ok = vcam.up_to_date(inst.vcam, names[inst.vcam])
             state = "installée ✓" if ok else ("à réparer" if scope else "non installée")
+            if admin:
+                state += (" · logiciels admin ✓" if vcam.admin_up_to_date(inst.vcam, names[inst.vcam])
+                          else " · logiciels admin : à mettre à jour")
             lines.append(f"{names[inst.vcam]} ({inst.name}) : {state}")
         self.vcam_status.setText("\n".join(lines) or "Aucune instance pour l'instant.")
 
@@ -792,7 +815,8 @@ class SettingsDialog(QDialog):
             return
         run_task(self, "Mise à jour d'OBS", self.manager.update_obs,
                  on_done=lambda _r: (self._refresh(), QMessageBox.information(
-                     self, "Multi OBS", "Les instances utilisent maintenant la nouvelle version d'OBS.")))
+                     self, "Multi OBS", "Les instances utilisent maintenant la nouvelle version d'OBS."),
+                     self.main.offer_vcam_admin_update(), self._refresh()))
 
     def _install_vcams(self):
         indices = sorted({i.vcam for i in self.manager.instances})
@@ -809,6 +833,9 @@ class SettingsDialog(QDialog):
             else:
                 QMessageBox.information(self, "Multi OBS", "Caméras virtuelles installées.\n"
                                         "Redémarre les instances et les applis (Discord…) qui doivent les voir.")
+                if self.manager.settings.get("vcam_admin"):
+                    self.main.offer_vcam_admin_update()
+                    self._refresh()
         # De nouveau gérées par Multi OBS : réinstallées à l'allumage et si elles disparaissent.
         self.manager.settings["vcam_scope"] = vcam.SCOPE_USER
         self.manager.save()
@@ -827,10 +854,70 @@ class SettingsDialog(QDialog):
                                  "Elles ne reviendront qu'avec « Installer / réparer ».")
         if r == QMessageBox.StandardButton.Yes:
             self.manager.settings["vcam_scope"] = "none"   # sinon réinstallées au prochain allumage
+            self.manager.settings["vcam_admin"] = False
             self.manager.save()
+            self._set_vcam_admin_box(False)
             applog.log("Paramètres : « Désinstaller » les caméras virtuelles")
-            vcam.uninstall(list(range(1, obsfiles.MAX_VCAM + 1)))
-            self._refresh()
+            # Celles installées pour tout le PC : Windows demande l'autorisation.
+            run_task(self, "Caméras virtuelles", lambda _p: vcam.uninstall(list(range(1, obsfiles.MAX_VCAM + 1))),
+                     on_done=lambda _r: (self._refresh(), self.main.refresh_status()))
+
+    def _set_vcam_admin_box(self, on: bool) -> None:
+        self.vcam_admin.blockSignals(True)
+        self.vcam_admin.setChecked(on)
+        self.vcam_admin.blockSignals(False)
+
+    def _toggle_vcam_admin(self, on: bool) -> None:
+        """Case « logiciels lancés en administrateur » : installe ou retire tout de suite (autorisation de Windows)."""
+        s = self.manager.settings
+        if on:
+            if s.get("vcam_scope") == "none" or obsfiles.runtime_signature() is None:
+                QMessageBox.information(self, "Multi OBS", "Installe d'abord les caméras virtuelles : allume une "
+                                        "instance, ou « Installer / réparer » ci-dessus.")
+                self._set_vcam_admin_box(False)
+                return
+            s["vcam_admin"] = True
+            self.manager.save()
+            applog.log("Paramètres : caméras aussi pour les logiciels lancés en administrateur")
+            self.vcam_admin.setEnabled(False)
+
+            def installed(failed):
+                self.vcam_admin.setEnabled(True)
+                if failed is None:   # autorisation refusée : l'option reste décochée
+                    s["vcam_admin"] = False
+                    self.manager.save()
+                    self._set_vcam_admin_box(False)
+                    QMessageBox.information(self, "Multi OBS", "Autorisation refusée par Windows : les caméras ne "
+                                            "sont pas installées pour les logiciels lancés en administrateur.")
+                elif failed:
+                    QMessageBox.warning(self, "Multi OBS", "Les caméras n'ont pas pu être installées pour tout le "
+                                        "PC (détails dans le journal). Réessaie avec le lien en bas de la fenêtre "
+                                        "de Multi OBS.")
+                else:
+                    QMessageBox.information(self, "Multi OBS", "Caméras installées pour les logiciels lancés en "
+                                            "administrateur.\n\nRedémarre TikTok LIVE Studio (ou l'appli) : "
+                                            "les VCam apparaissent dans sa liste de caméras.")
+                self._refresh()
+                self.main.refresh_status()
+            self.main.update_vcam_admin(ask=False, on_done=installed)
+        else:
+            self.vcam_admin.setEnabled(False)
+
+            def removed(ok):
+                self.vcam_admin.setEnabled(True)
+                if ok is None:   # autorisation refusée : rien n'a changé
+                    self._set_vcam_admin_box(True)
+                    QMessageBox.information(self, "Multi OBS", "Autorisation refusée par Windows : les caméras "
+                                            "restent installées pour les logiciels lancés en administrateur.")
+                else:
+                    s["vcam_admin"] = False
+                    self.manager.save()
+                    applog.log("Paramètres : caméras retirées des logiciels lancés en administrateur")
+                    if not ok:
+                        QMessageBox.warning(self, "Multi OBS", "Retrait incomplet (détails dans le journal).")
+                self._refresh()
+                self.main.refresh_status()
+            self.main.remove_vcam_admin(on_done=removed)
 
     def done(self, r):
         s = self.manager.settings

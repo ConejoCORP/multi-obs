@@ -3,6 +3,18 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.14
+
+- **Caméras virtuelles dans TikTok LIVE Studio** (et les autres logiciels lancés en administrateur). TikTok LIVE
+  Studio se lance toujours en administrateur. Windows ne lui montre alors que les caméras installées pour tout le
+  PC, comme « OBS Virtual Camera » : les VCam de Multi OBS, installées pour ton compte, n'apparaissaient pas.
+  - Nouvelle option dans **Paramètres → Caméras virtuelles** : « Rendre les caméras visibles aussi par les
+    logiciels lancés en administrateur ». Elle installe aussi les caméras pour tout le PC, dans Program Files,
+    comme OBS. Windows demande l'autorisation pour « Windows PowerShell ».
+  - Quand une caméra change (nouvelle couleur, instance ajoutée ou supprimée, mise à jour d'OBS), Multi OBS
+    propose de la mettre à jour, ou affiche un lien en bas de sa fenêtre.
+  - Les autres logiciels (Discord, navigateur…) gardent les caméras installées pour ton compte, comme avant.
+
 ## 1.1.13
 
 - **Modère ton chat Twitch depuis Multi OBS**, avec les icônes du chat de Twitch devant chaque message :
