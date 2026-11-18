@@ -3,6 +3,16 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.15
+
+- **SafeGuard détecte l'écran noir.** Pendant un rec ou un live, si l'image d'un OBS est entièrement noire depuis
+  10 secondes (caméra débranchée, capture perdue, scène vide…), l'alerte rouge s'affiche : bandeau rouge, bouton de
+  la barre des tâches qui clignote, cadre rouge sur le Stream Deck. Quand l'image revient, Multi OBS le dit.
+  - Activée par défaut. Le délai se règle dans **Paramètres → SafeGuard → Écran noir** (de 5 s à 2 min, ou
+    « Jamais »).
+  - Le moindre élément visible (même un petit texte) compte comme une image : seule une image vraiment toute noire
+    déclenche l'alerte. Rien n'est surveillé pendant une pause du rec.
+
 ## 1.1.14
 
 - **Caméras virtuelles dans TikTok LIVE Studio** (et les autres logiciels lancés en administrateur). TikTok LIVE

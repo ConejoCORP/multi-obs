@@ -8,7 +8,24 @@ import re
 import time
 from pathlib import Path
 
+from PySide6.QtGui import QImage
+
 COOLDOWN_S = 60   # une même alerte ne revient pas avant une minute (OBS répète certaines lignes)
+
+# Écran noir : petite capture de la scène à l'antenne (assez large pour qu'un petit texte reste visible).
+BLACK_SHOT_WIDTH = 256
+BLACK_LEVEL = 30   # sur 255 : aucun pixel plus clair que ça = écran noir (bruit et noir « vidéo » à 16 compris)
+
+
+def is_black(img: QImage, level: int = BLACK_LEVEL) -> bool:
+    """Image sans aucune information : aucun pixel plus clair que `level` sur aucune couleur. Ce qui est
+    transparent (rien de dessiné) compte comme noir. Une image illisible n'est pas jugée noire."""
+    if img.isNull() or img.width() <= 0 or img.height() <= 0:
+        return False
+    img = img.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+    data = bytes(img.constBits())[:img.sizeInBytes()]
+    # Octets B, V, R, A de chaque pixel : seules les couleurs comptent (prémultipliées par l'opacité).
+    return max(max(data[0::4]), max(data[1::4]), max(data[2::4])) <= level
 
 # (motif dans la ligne du journal, message ; {0} = premier groupe du motif)
 PATTERNS = [

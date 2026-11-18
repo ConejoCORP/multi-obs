@@ -29,7 +29,7 @@ Parce que deux OBS lancés normalement partagent le même dossier de configurati
 - 🧩 **Instances indépendantes** — scènes, profils, plugins et réglages séparés ; aucune ne peut faire planter les autres
 - 🔗 **Pilotage global** — tout allumer, tout enregistrer, tout mettre en pause d'un clic ; une instance déliée (**Link**) reste à part, pratique pour le live
 - ⏱️ **Départ, pause et arrêt à l'image près** — « Tout enregistrer » aligne le début des fichiers, « Tout en pause » enlève exactement les mêmes images partout, « Tout arrêter » les finit sur la même image : même nombre d'images dans chaque fichier, les pistes se calent d'un coup au montage
-- 🚨 **Alertes immédiates** — rec bloqué, OBS fermé pendant le rec, erreur d'OBS, son qui décroche ou micro perdu, encodeur en panne, images perdues, disque presque plein : bandeau rouge, carte en rouge, bouton de la barre des tâches qui clignote, cadre rouge sur le Stream Deck ; tout se règle dans l'onglet **SafeGuard**
+- 🚨 **Alertes immédiates** — rec bloqué, OBS fermé pendant le rec, erreur d'OBS, son qui décroche ou micro perdu, encodeur en panne, images perdues, écran noir, disque presque plein : bandeau rouge, carte en rouge, bouton de la barre des tâches qui clignote, cadre rouge sur le Stream Deck ; tout se règle dans l'onglet **SafeGuard**
 - 🎛️ **Plugin Stream Deck** — des touches colorées pour chaque OBS ou pour tout Multi OBS : rec avec le timecode, pause, allumer / éteindre, scènes, sources, filtres, son, live… en appui court ou long, avec ton image, ton texte ou un picto ; installé en un clic
 - 👀 **Aperçu en direct sans compression**, vumètres audio, images perdues, CPU, et alertes (pas de son, disque presque plein, OBS qui attend une réponse) ; durée du rec (en rouge) et du live (en violet, ou la couleur de ton choix) sur l'aperçu
 - 💬 **Chat du live en un clic** — le bouton **Chat** de l'OBS du live ouvre ton chat Twitch, YouTube ou les deux réunis (un logo devant chaque message), avec le **fil d'actualité** en bas : abonnements, raids, bits, Super Chats, membres… et la **modération Twitch** (supprimer, exclure, bannir) avec les icônes de Twitch
@@ -69,12 +69,12 @@ Si quelque chose cloche pendant un rec ou un live, Multi OBS le dit tout de suit
 <img src="screenshots/13_alertes.png" width="760" alt="Alerte « micro perdu » : bandeau rouge et carte de l'instance en rouge">
 </div>
 
-Ce qui est surveillé : rec bloqué (le fichier ne grossit plus), rec qui ne démarre pas, arrêt qui ne se termine pas, OBS fermé ou planté pendant le rec, fenêtre d'erreur d'OBS, son qui décroche ou micro perdu, webcam ou carte d'acquisition en erreur, encodeur en panne, écriture du fichier impossible, carte graphique perdue, images perdues en rafale ou sautées à l'encodage, disque presque plein, et une deuxième capture de jeu du même jeu (elle enregistrerait du noir).
+Ce qui est surveillé : rec bloqué (le fichier ne grossit plus), rec qui ne démarre pas, arrêt qui ne se termine pas, OBS fermé ou planté pendant le rec, fenêtre d'erreur d'OBS, son qui décroche ou micro perdu, webcam ou carte d'acquisition en erreur, encodeur en panne, écriture du fichier impossible, carte graphique perdue, images perdues en rafale ou sautées à l'encodage, écran tout noir (10 s par défaut), disque presque plein, et une deuxième capture de jeu du même jeu (elle enregistrerait du noir).
 
-Tout se règle dans ⚙ → **SafeGuard** : délai avant « Pas de son » (2 min par défaut, le silence n'est compté que pendant le rec), seuils des images perdues et du disque, barre des tâches et Stream Deck, priorité des OBS et bridage de Windows.
+Tout se règle dans ⚙ → **SafeGuard** : délai avant « Pas de son » (2 min par défaut, le silence n'est compté que pendant le rec), délai avant l'alerte « Écran noir » (10 s par défaut, ou jamais), seuils des images perdues et du disque, barre des tâches et Stream Deck, priorité des OBS et bridage de Windows.
 
 <div align="center">
-<img src="screenshots/15_safeguard.png" width="560" alt="Onglet SafeGuard des paramètres : silence, images perdues, disque, où prévenir, stabilité des OBS">
+<img src="screenshots/15_safeguard.png" width="560" alt="Onglet SafeGuard des paramètres : silence, écran noir, images perdues, disque, où prévenir, stabilité des OBS">
 </div>
 
 Sur le Stream Deck, les touches de l'OBS concerné et les touches **TOUS** prennent un cadre rouge et affichent « ALERTE » une seconde sur deux :

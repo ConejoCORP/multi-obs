@@ -60,6 +60,7 @@ DEFAULT_SETTINGS = {
     "remote_enabled": True,             # pilotage par le plugin Stream Deck (serveur local, 127.0.0.1)
     # SafeGuard (onglet des paramètres) : surveillance des recs et des lives
     "silence_warn_s": 120,              # « Pas de son » après ce silence (0 : jamais)
+    "black_warn_s": 10,                 # alerte « écran noir » après ce temps d'image toute noire (0 : jamais)
     "drop_warn_frames": 10,             # avertissement « images perdues » à partir de ce total
     "low_disk_gb": 10,                  # alerte « disque presque plein » sous ce nombre de Go
     "alert_taskbar": True,              # bouton de Multi OBS qui clignote dans la barre des tâches

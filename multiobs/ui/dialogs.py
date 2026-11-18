@@ -21,6 +21,7 @@ PREVIEW_BACKGROUND_CHOICES = [(-1, "Comme au premier plan"), (5, "5 images/s"), 
                               (0, "En pause")]
 # SafeGuard : crans des curseurs (silence en secondes, 0 = jamais ; images ; Go)
 SILENCE_CHOICES = [10, 20, 30, 45, 60, 90, 120, 180, 300, 600, 0]
+BLACK_CHOICES = [5, 10, 15, 20, 30, 45, 60, 120, 0]
 DROP_WARN_CHOICES = [1, 2, 3, 5, 10, 20, 30, 50, 100]
 LOW_DISK_CHOICES = [2, 5, 10, 20, 50, 100]
 
@@ -373,21 +374,26 @@ class SettingsDialog(QDialog):
         grid.setVerticalSpacing(2)
         self.silence = StepSlider(SILENCE_CHOICES, int(manager.settings.get("silence_warn_s", 120)),
                                   lambda v: duration_text(v) if v else "Jamais")
+        self.black = StepSlider(BLACK_CHOICES, int(manager.settings.get("black_warn_s", 10)),
+                                lambda v: duration_text(v) if v else "Jamais")
         self.drop_warn = StepSlider(DROP_WARN_CHOICES, int(manager.settings.get("drop_warn_frames", 10)),
                                     lambda v: f"{v} image" if v == 1 else f"{v} images")
         self.low_disk = StepSlider(LOW_DISK_CHOICES, int(manager.settings.get("low_disk_gb", 10)),
                                    lambda v: f"{v} Go")
-        for row, (label, slider, hint) in enumerate((
-                ("Silence", self.silence, "« Pas de son » sur la carte après ce temps sans aucun son pendant un rec"),
-                ("Images perdues", self.drop_warn, "Avertissement sur la carte ; l'alerte rouge part toujours dès "
-                                                   "6 images en 10 s"),
-                ("Disque presque plein", self.low_disk, "Alerte rouge pendant un rec quand il reste moins que ça "
-                                                        "sur le disque"))):
+        rows = (
+            ("Silence", self.silence, "« Pas de son » sur la carte après ce temps sans aucun son pendant un rec"),
+            ("Écran noir", self.black, "Alerte rouge pendant un rec ou un live quand l'image est toute noire "
+                                       "depuis ce temps"),
+            ("Images perdues", self.drop_warn, "Avertissement sur la carte ; l'alerte rouge part toujours dès "
+                                               "6 images en 10 s"),
+            ("Disque presque plein", self.low_disk, "Alerte rouge pendant un rec quand il reste moins que ça "
+                                                    "sur le disque"))
+        for row, (label, slider, hint) in enumerate(rows):
             grid.addWidget(QLabel(label), 2 * row, 0)
             grid.addWidget(slider, 2 * row, 1)
             note = QLabel(hint)
             note.setProperty("muted", True)
-            note.setContentsMargins(0, 0, 0, 10 if row < 2 else 0)
+            note.setContentsMargins(0, 0, 0, 10 if row < len(rows) - 1 else 0)
             grid.addWidget(note, 2 * row + 1, 1)
         grid.setColumnStretch(1, 1)
         safe.addWidget(g)
@@ -938,6 +944,7 @@ class SettingsDialog(QDialog):
         s["sync_stop"] = self.sync_stop.isChecked()
         s["sync_resume"] = self.sync_resume.isChecked()
         s["silence_warn_s"] = self.silence.value()
+        s["black_warn_s"] = self.black.value()
         s["drop_warn_frames"] = self.drop_warn.value()
         s["low_disk_gb"] = self.low_disk.value()
         s["alert_taskbar"] = self.alert_taskbar.isChecked()

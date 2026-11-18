@@ -1,4 +1,5 @@
 """Pilotage d'une instance : processus OBS, connexion WebSocket, état, aperçu et audio."""
+import base64
 import math
 import os
 import shutil
@@ -29,6 +30,7 @@ METER_FLOOR_DB = -60.0
 # Rec (hors pause) dont le fichier ne grossit plus pendant 10 s : bloqué (encodeur, son ou disque en panne).
 # Pas moins : sous très forte charge, l'encodeur peut avoir plusieurs secondes de retard après une reprise.
 STALL_S = 10
+BLACK_CHECK_TICKS = 2   # écran noir : une capture de la scène toutes les 2 s pendant un rec ou un live
 # Après « rec arrêté », OBS ferme encore l'encodeur quelques instants (il se dit toujours actif).
 STOP_SETTLE_S = 4
 # Images manquantes : verdict seulement sur des images rendues au moins 1 s après le départ / la reprise.
@@ -160,6 +162,8 @@ class InstanceController(QObject):
         self._stop_asked = 0.0                       # arrêt du rec demandé (et pas encore fini)
         self._start_asked = 0.0                      # départ du rec demandé (et pas encore vu)
         self._rec_event_at = 0.0                     # dernier changement d'état du rec annoncé par OBS
+        self._black_since = 0.0                      # image entièrement noire depuis (0 : image normale)
+        self._black_pending = False                  # capture de la scène demandée, pas encore reçue
         self._sync_origin = None                     # origine du fichier d'après le module (images sautées)
         self._sync_gen = None
         self._skipped = 0
@@ -269,6 +273,43 @@ class InstanceController(QObject):
             self._clear("disk")
         if rec and self._disk_tick % 2 == 0:
             self.ws.call("CallVendorRequest", SYNC_STATUS, self._on_sync_status)
+        self._check_black(now, self.connected and ((self.recording and not self.paused) or self.streaming))
+
+    def _check_black(self, now: float, active: bool) -> None:
+        """Écran noir (SafeGuard) : pendant un rec ou un live, une petite capture de la scène à l'antenne toutes
+        les 2 s. Entièrement noire depuis « black_warn_s » secondes (0 : jamais) → alerte rouge."""
+        limit = int(self.settings.get("black_warn_s", 10))
+        if not (active and limit and self.scene):
+            self._black_since = 0.0
+            self._clear("black")   # rec arrêté ou en pause : plus rien à surveiller
+            return
+        if self._disk_tick % BLACK_CHECK_TICKS == 0 and not self._black_pending:
+            self._black_pending = True
+            self.ws.call("GetSourceScreenshot", {"sourceName": self.scene, "imageFormat": "png",
+                                                 "imageWidth": health.BLACK_SHOT_WIDTH,
+                                                 "imageCompressionQuality": -1},
+                         lambda ok, d, _s, asked=now: self._on_black_shot(ok, d, asked))
+        if self._black_since and now - self._black_since >= limit:
+            self._raise("black", f"ÉCRAN NOIR depuis {duration_text(now - self._black_since)} : la scène "
+                                 f"« {self.scene} » n'affiche plus rien (caméra ou capture débranchée ?)")
+
+    def _on_black_shot(self, ok: bool, d: dict, asked: float) -> None:
+        self._black_pending = False
+        data = (d or {}).get("imageData") if ok else None
+        if not data:
+            return   # scène introuvable (renommée…) : pas de jugement
+        img = QImage.fromData(base64.b64decode(data.split(",", 1)[-1]))
+        if img.isNull():
+            return
+        if health.is_black(img):
+            if not self._black_since:
+                self._black_since = asked
+            return
+        if "black" in self.alerts:
+            self._raise("black_end", f"L'image est restée noire {duration_text(time.monotonic() - self._black_since)}"
+                                     ", puis elle est revenue", 300)
+            self._clear("black")
+        self._black_since = 0.0
 
     def _on_sync_status(self, ok: bool, d: dict, _s: dict) -> None:
         """Module multiobs-sync : l'origine du fichier ne bouge qu'avec une pause. Si elle avance sans
