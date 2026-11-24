@@ -33,9 +33,10 @@ Parce que deux OBS lancés normalement partagent le même dossier de configurati
 - 🎛️ **Plugin Stream Deck** — des touches colorées pour chaque OBS ou pour tout Multi OBS : rec avec le timecode, pause, allumer / éteindre, scènes, sources, filtres, son, live… en appui court ou long, avec ton image, ton texte ou un picto ; installé en un clic
 - 👀 **Aperçu en direct sans compression**, vumètres audio, images perdues, CPU, et alertes (pas de son, disque presque plein, OBS qui attend une réponse) ; durée du rec (en rouge) et du live (en violet, ou la couleur de ton choix) sur l'aperçu
 - 💬 **Chat du live en un clic** — le bouton **Chat** de l'OBS du live ouvre ton chat Twitch, YouTube ou les deux réunis (un logo devant chaque message), avec le **fil d'actualité** en bas : abonnements, raids, bits, Super Chats, membres… et la **modération Twitch** (supprimer, exclure, bannir) avec les icônes de Twitch
+- 🖥️ **Cartes à la bonne taille** — selon leur nombre et ton écran (1080p, 1440p, 4K), les aperçus prennent toute la place sans défilement : commandes sous l'aperçu, ou à côté sur deux lignes quand c'est plus grand
 - 🗂️ **Instances réduites** — le bouton **œil barré** range une instance dont tu ne te sers pas (l'OBS du live…) dans une barre en bas, avec son état ; **Remettre** la ramène parmi les autres
 - 🎥 **Une caméra virtuelle par instance**, au nom de sa couleur — « VCam Rouge », « VCam Bleu »… pour Discord, Zoom ou une autre instance, sans droits administrateur
-- 🏷️ **Nommage automatique** — `Nom-type-Vidéo-date_heure`, avec tes propres types (Cam, Écran et Live par défaut)
+- 🏷️ **Nommage automatique** — `Nom-type-Vidéo-date_heure`, avec tes propres types (Cam, Écran et Live par défaut) ; la longueur finale du chemin est vérifiée avant chaque rec (limite de Windows), pour ne jamais rater un fichier
 - 🎞️ **MKV → MP4 automatique** à la fin du rec, avec l'avancement de chaque conversion sur sa carte, et option pour mettre le MKV à la corbeille une fois le MP4 vérifié ; si tu éteins pendant une conversion, Multi OBS propose d'attendre la fin
 - 💾 **Espace disque** et fichier en cours affichés sur chaque instance, dossier d'enregistrement en un clic
 - 🎨 **Une couleur par instance** — thème OBS teinté, logo coloré dans la barre des tâches, image de caméra virtuelle assortie

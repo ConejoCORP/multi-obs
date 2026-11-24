@@ -1,15 +1,16 @@
 """Carte d'une instance : aperçu, audio, état et commandes."""
 import os
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox,
-                               QPushButton, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFontMetrics
+from PySide6.QtWidgets import (QBoxLayout, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox,
+                               QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from .. import naming, theme, twitch
 from ..controller import InstanceController
 from ..instance_config import record_directory
 from ..theme import YAMI
+from . import cardlayout
 from .dialogs import ask_conversions
 from .widgets import DiskBar, MeterWidget, PreviewWidget, RemuxBar, color_dot, human_size, icon
 
@@ -40,7 +41,19 @@ def _status_chip(c: InstanceController) -> tuple[str, str]:
     return "Actif", "ready"
 
 
+def _clear(layout) -> None:
+    """Vide un layout sans détruire ses widgets (ils restent dans la carte)."""
+    while layout.count():
+        layout.takeAt(0)
+
+
 class InstanceCard(QFrame):
+    STRIPE_H = 4
+    BORDER = 1                  # bordure de la carte (feuille de style), de chaque côté
+    MARGINS = (10, 8, 10, 10)   # gauche, haut, droite, bas
+    SPACING = 7
+    BUTTON_ROW_GAP = 5
+    layoutNeeded = Signal()     # la taille prévue pour la carte a changé (vumètres en plus)
     launchRequested = Signal(str)
     editRequested = Signal(str)
     deleteRequested = Signal(str)
@@ -59,22 +72,24 @@ class InstanceCard(QFrame):
         self.fill_chat_menu = None     # idem : fill_chat_menu(menu, id), menu du bouton Chat (flèche, clic droit)
         self.vcam_name = vcam_name     # « VCam Rouge » : nom de la caméra virtuelle dans Windows
         self.setObjectName("instanceCard")
-        self.setMinimumWidth(420)
+        self._mode = ""                # "vertical" (commandes sous l'aperçu) ou "side" (à droite)
+        self._layout_args = None       # dernière disposition demandée par la fenêtre : (mode, aperçu, carte)
+        self._meter_rows = 2           # vumètres prévus dans la taille des cartes (le plus vu depuis l'ouverture)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self.stripe = QFrame()
-        self.stripe.setFixedHeight(4)
+        self.stripe.setFixedHeight(self.STRIPE_H)
         outer.addWidget(self.stripe)
 
-        body = QVBoxLayout()
-        body.setContentsMargins(10, 8, 10, 10)
-        body.setSpacing(7)
+        body = self._body = QVBoxLayout()
+        body.setContentsMargins(*self.MARGINS)
+        body.setSpacing(self.SPACING)
         outer.addLayout(body)
 
         # En-tête : nom, état, caméra virtuelle, type, menu
-        head = QHBoxLayout()
+        head = self._head = QHBoxLayout()
         head.setSpacing(8)
         self.dot = QLabel()
         self.name = QLabel(objectName="cardName")
@@ -109,32 +124,54 @@ class InstanceCard(QFrame):
         body.addLayout(head)
         self._build_menu()
 
+        # Aperçu puis le reste (vumètres, infos, disque, boutons) : dessous, ou à droite (« side »).
+        self._content = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        self._content.setSpacing(self.SPACING)
+        body.addLayout(self._content)
         self.preview = PreviewWidget()
         self.preview.doubleClicked.connect(self._show_window)
         self.preview.expandRequested.connect(lambda: self._set_preview_hidden(False))
         self.preview.targetChanged.connect(ctrl.set_preview_target)
-        body.addWidget(self.preview)
+        self._content.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignTop)
+        self.details = QWidget()
+        details = QVBoxLayout(self.details)
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(self.SPACING)
+        self._content.addWidget(self.details, 0, Qt.AlignmentFlag.AlignTop)
 
         self.meters = MeterWidget()
         self.meters.muteToggled.connect(ctrl.toggle_mute)
-        body.addWidget(self.meters)
+        details.addWidget(self.meters)
 
         self.warning = QLabel(objectName="warning")
         self.warning.setWordWrap(True)
-        body.addWidget(self.warning)
+        details.addWidget(self.warning)
 
+        # Infos (ips, CPU, scène…) : hauteur fixe, texte coupé à la largeur (une ligne sous l'aperçu, deux à
+        # côté). Sans retour à la ligne automatique : mis à jour chaque seconde, il ferait recalculer toute
+        # la fenêtre à chaque fois (interface moins fluide).
         self.stats = QLabel(objectName="stats")
-        body.addWidget(self.stats)
+        self.stats.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._stats_parts: tuple[list[str], list[str]] = ([], [])
+        self.stats.installEventFilter(self)   # largeur changée : texte recoupé
+        details.addWidget(self.stats)
 
         self.disk = DiskBar()
-        body.addWidget(self.disk)
+        details.addWidget(self.disk)
         self.remux_bar = RemuxBar()    # à la place du stockage pendant la conversion MP4
         self.remux_bar.hide()
-        body.addWidget(self.remux_bar)
+        details.addWidget(self.remux_bar)
 
-        # Commandes
-        row = QHBoxLayout()
-        row.setSpacing(5)
+        # Commandes : une ligne sous l'aperçu, deux lignes à sa droite (voir _arrange)
+        self.controls = QWidget()
+        controls = QVBoxLayout(self.controls)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(self.BUTTON_ROW_GAP)
+        self._row1, self._row2 = QHBoxLayout(), QHBoxLayout()
+        for row in (self._row1, self._row2):
+            row.setSpacing(5)
+            controls.addLayout(row)
+        details.addWidget(self.controls)
         self.power_btn = self._button("power.svg", "Allumer",
                                       "Allumer / éteindre l'OBS de cette instance.\n"
                                       "Il tourne réduit : tu le pilotes d'ici.")
@@ -179,16 +216,7 @@ class InstanceCard(QFrame):
         self.include.setToolTip("Lié : cette instance suit les boutons « Tout enregistrer » / « Tout en pause »\n"
                                 "et les raccourcis clavier. Délie-la pour la piloter à part (ex. l'OBS du live).")
         self.include.toggled.connect(self._link_toggled)
-        row.addWidget(self.power_btn)
-        row.addWidget(self.show_btn)
-        row.addSpacing(8)
-        row.addWidget(self.rec_btn)
-        row.addWidget(self.pause_btn)
-        row.addWidget(self.folder_btn)
-        row.addWidget(self.chat_btn)
-        row.addStretch(1)
-        row.addWidget(self.include)
-        body.addLayout(row)
+        self._arrange("vertical")
 
         ctrl.changed.connect(self.refresh)
         ctrl.preview.connect(self.preview.set_image)
@@ -196,6 +224,98 @@ class InstanceCard(QFrame):
         self.apply_definition()
         self.refresh()
         self._refresh_meters()
+
+    # ------------------------------------------------------------------ #
+    # Disposition (choisie par la fenêtre selon le nombre de cartes et la place, voir cardlayout.py)
+    # ------------------------------------------------------------------ #
+    def _arrange(self, mode: str) -> None:
+        """Commandes sous l'aperçu (une ligne de boutons) ou à sa droite (colonne, deux lignes de boutons)."""
+        if mode == self._mode:
+            return
+        self._mode = mode
+        side = mode == "side"
+        self._content.setDirection(QBoxLayout.Direction.LeftToRight if side else QBoxLayout.Direction.TopToBottom)
+        self._content.setSpacing(cardlayout.GAP if side else self.SPACING)
+        if side:
+            self.details.setFixedWidth(cardlayout.SIDE_W)
+        else:
+            self.details.setMinimumWidth(0)
+            self.details.setMaximumWidth(16777215)
+        self.stats.ensurePolished()
+        self.stats.setFixedHeight(self._stats_lines() * QFontMetrics(self.stats.font()).lineSpacing())
+        self._set_stats(*self._stats_parts)
+        _clear(self._row1)
+        _clear(self._row2)
+        if side:
+            for w in (self.power_btn, self.show_btn):
+                self._row1.addWidget(w)
+            self._row1.addStretch(1)
+            self._row1.addWidget(self.include)
+            for w in (self.rec_btn, self.pause_btn, self.folder_btn, self.chat_btn):
+                self._row2.addWidget(w)
+            self._row2.addStretch(1)
+        else:
+            self._row1.addWidget(self.power_btn)
+            self._row1.addWidget(self.show_btn)
+            self._row1.addSpacing(8)
+            for w in (self.rec_btn, self.pause_btn, self.folder_btn, self.chat_btn):
+                self._row1.addWidget(w)
+            self._row1.addStretch(1)
+            self._row1.addWidget(self.include)
+
+    def chrome(self, meter_rows: int) -> cardlayout.Chrome:
+        """Place prise autour de l'aperçu, avec meter_rows vumètres (pour calculer la disposition)."""
+        for w in (self, self.stats, self.power_btn, self.name, self.type_combo):
+            w.ensurePolished()
+        left, top, right, bottom = self.MARGINS
+        head_h = self._head.sizeHint().height()
+        stats_h = QFontMetrics(self.stats.font()).lineSpacing()   # par ligne (1 dessous, 2 à côté)
+        btn_h = max(w.sizeHint().height() for w in (self.power_btn, self.rec_btn, self.chat_btn, self.include))
+        meters_h = meter_rows * MeterWidget.ROW_H
+        disk_h = self.disk.minimumHeight()
+        sp = self.SPACING
+        return cardlayout.Chrome(
+            pad_w=left + right + 2 * self.BORDER,
+            top=self.STRIPE_H + self.BORDER + top + head_h + sp,
+            below=sp + meters_h + sp + stats_h + sp + disk_h + sp + btn_h + bottom + self.BORDER,
+            bottom=bottom + self.BORDER,
+            side_h=meters_h + sp + 2 * stats_h + sp + disk_h + sp + 2 * btn_h + self.BUTTON_ROW_GAP)
+
+    def eventFilter(self, obj, e):
+        if obj is self.stats and e.type() == QEvent.Type.Resize:
+            self._set_stats(*self._stats_parts)
+        return super().eventFilter(obj, e)
+
+    def _stats_lines(self) -> int:
+        return 2 if self._mode == "side" else 1
+
+    def _set_stats(self, first: list[str], second: list[str]) -> None:
+        """Infos de la carte : performances, puis scène et aperçu (à la suite, ou sur une 2e ligne à côté de
+        l'aperçu), chaque ligne coupée à la largeur."""
+        self._stats_parts = (first, second)
+        sep = "  ·  "
+        lines = [sep.join(first + second)] if self._stats_lines() == 1 else [sep.join(first), sep.join(second)]
+        fm = QFontMetrics(self.stats.font())
+        width = max(40, self.stats.width())
+        text = "\n".join(fm.elidedText(line, Qt.TextElideMode.ElideRight, width) for line in lines)
+        if text != self.stats.text():
+            self.stats.setText(text)
+        self.stats.setToolTip(sep.join(first + second))
+
+    def meter_rows(self) -> int:
+        """Vumètres prévus pour cette carte : le plus qu'elle en a eu (2 au moins), pour une taille stable."""
+        return self._meter_rows
+
+    def apply_layout(self, mode: str, pw: int, card_w: int) -> None:
+        """Disposition donnée par la fenêtre : mode, largeur de l'aperçu, largeur de la carte."""
+        self._layout_args = (mode, pw, card_w)
+        if self.preview.collapsed:   # aperçu masqué : un bandeau en haut, les commandes dessous
+            self._arrange("vertical")
+            self.preview.set_box(card_w - (self.MARGINS[0] + self.MARGINS[2] + 2 * self.BORDER))
+        else:
+            self._arrange(mode)
+            self.preview.set_box(pw)
+        self.setFixedWidth(card_w)
 
     # ------------------------------------------------------------------ #
     def _button(self, icon_name: str, text: str, tip: str) -> QPushButton:
@@ -274,6 +394,8 @@ class InstanceCard(QFrame):
 
     def _set_preview_hidden(self, hidden: bool) -> None:
         self.preview.set_collapsed(hidden)
+        if self._layout_args:
+            self.apply_layout(*self._layout_args)
         self.previewHiddenChanged.emit(self.ctrl.inst.id, hidden)
 
     def apply_definition(self) -> None:
@@ -300,6 +422,8 @@ class InstanceCard(QFrame):
         self.include.blockSignals(False)
         self.reload_types()
         self.preview.set_collapsed(inst.preview_hidden)
+        if self._layout_args:
+            self.apply_layout(*self._layout_args)
 
     # ------------------------------------------------------------------ #
     def _power(self) -> None:
@@ -408,23 +532,22 @@ class InstanceCard(QFrame):
         self._set_active(self.vcam_btn, "on" if c.vcam_on else "")
 
         if connected:
-            parts = [f"{c.fps or 0:.0f} ips", f"CPU {c.cpu or 0:.1f} %", f"{c.memory or 0:.0f} Mo"]
+            perf = [f"{c.fps or 0:.0f} ips", f"CPU {c.cpu or 0:.1f} %", f"{c.memory or 0:.0f} Mo"]
             if c.render_skipped or c.output_skipped:
-                parts.append(f"perdues {c.render_skipped + c.output_skipped}")
+                perf.append(f"perdues {c.render_skipped + c.output_skipped}")
             if c.recording and c.rec_bytes:
-                parts.append(human_size(c.rec_bytes))
-            if c.scene:
-                parts.append(f"Scène : {c.scene}")
+                perf.append(human_size(c.rec_bytes))
+            where = [f"Scène : {c.scene}"] if c.scene else []
             if not c.inst.preview_hidden and fps_setting > 0:
                 preview = f"aperçu {c.preview_fps_measured:.0f} i/s" if c.preview_fps_measured else "aperçu"
                 if c.preview_note:
                     preview += f" ({c.preview_note})"
-                parts.append(preview)
-            self.stats.setText("  ·  ".join(parts))
+                where.append(preview)
+            self._set_stats(perf, where)
         elif status == "starting":
-            self.stats.setText("En attente d'OBS…")
+            self._set_stats(["En attente d'OBS…"], [])
         else:
-            self.stats.setText(f"Port {c.inst.port}  ·  dossier {c.inst.id}")
+            self._set_stats([f"Port {c.inst.port}", f"dossier {c.inst.id}"], [])
 
         remux = c.remux_progress
         self.remux_bar.setVisible(remux is not None)
@@ -455,6 +578,9 @@ class InstanceCard(QFrame):
         if c.connected and not rows:
             empty = "Aucune source audio active"
         self.meters.set_rows(rows, empty)
+        if len(rows) > self._meter_rows:   # plus de vumètres que prévu : la fenêtre recalcule les tailles
+            self._meter_rows = len(rows)
+            self.layoutNeeded.emit()
 
 
 class MiniChip(QFrame):

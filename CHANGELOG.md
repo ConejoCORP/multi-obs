@@ -3,6 +3,28 @@
 Chaque version publiée avec `python release.py X.Y.Z` reprend la section correspondante :
 c'est ce texte que Multi OBS affiche quand il propose la mise à jour.
 
+## 1.1.16
+
+- **Les cartes s'adaptent à leur nombre et à ton écran** (1080p, 1440p, 4K). Multi OBS cherche la disposition qui
+  donne les plus grands aperçus sans faire défiler la fenêtre :
+  - une carte seule ne déborde plus de l'écran : elle prend la taille qu'elle aurait avec deux cartes, centrée ;
+  - 3 ou 4 cartes sur un écran large passent sur deux lignes, avec les commandes à droite de l'aperçu
+    (en 1440p, aperçus de 900 px de large au lieu de 600 pour 4 cartes) ;
+  - 5 ou 6 cartes : trois par ligne au lieu de cinq côte à côte ;
+  - une dernière ligne incomplète est centrée.
+- **Plus de nom de fichier trop long.** Windows refuse un chemin de plus de 260 caractères (dossier + nom du
+  fichier) : OBS ne peut pas créer le fichier, ou la conversion en MP4 et le logiciel de montage échouent. Multi OBS
+  calcule maintenant la taille finale du chemin de chaque instance :
+  - dans **Vidéo** (et la fenêtre « Nom de la vidéo »), on ne peut pas taper plus long que la limite ; à
+    l'approche, un message dit combien de caractères il reste, et pour quel dossier ;
+  - un nom déjà trop long (dossier changé dans OBS…) s'affiche en rouge, et « Lancer le rec » reste grisé ;
+  - juste avant chaque rec, avec le vrai dossier d'OBS : si ça dépasse, le nom de la vidéo est raccourci pour
+    tenir ; si même le dossier seul est trop long, le rec n'est pas lancé et l'alerte rouge le dit.
+- **Interface plus fluide.** La surveillance de chaque OBS, faite chaque seconde, bloquait Multi OBS environ 23 ms à
+  chaque fois : elle en prend maintenant à peine plus d'une. Aperçus et boutons plus réguliers, surtout avec
+  plusieurs OBS ouverts, et Multi OBS ne se fige plus une fraction de seconde quand un OBS démarre.
+- Correction : après un redémarrage de Multi OBS, un OBS resté ouvert pouvait (rarement) ne pas être repris.
+
 ## 1.1.15
 
 - **SafeGuard détecte l'écran noir.** Pendant un rec ou un live, si l'image d'un OBS est entièrement noire depuis

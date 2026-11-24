@@ -5,12 +5,18 @@ from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QLayout, QSizePolicy, QWidget
+from PySide6.QtWidgets import QLayout, QLineEdit, QSizePolicy, QWidget
 
-from .. import paths
+from .. import naming, paths
 from ..theme import YAMI
 
 _icon_cache: dict[str, QIcon] = {}
+
+
+def limit_name(edit: QLineEdit, room: int) -> None:
+    """Pas de saisie au-delà de la place qui reste avant la limite de Windows (room caractères ; négatif :
+    déjà trop long). Le texte déjà là n'est jamais coupé : on peut toujours effacer."""
+    edit.setMaxLength(max(1, naming.win_len(edit.text()) + max(0, room)))
 
 
 def icon(name: str) -> QIcon:
@@ -63,6 +69,7 @@ class PreviewWidget(QWidget):
         self.badges: list[tuple[str, str]] = []
         self.corner = ""
         self.collapsed = False
+        self._box_w = 0   # largeur imposée par la disposition des cartes (0 : libre, 16:9 de la largeur)
         # Autour de l'image : la couleur de la carte (du noir passerait pour du vide dans la scène OBS).
         self.background = QColor(YAMI["grey8"])
         self._screen_hooked = False
@@ -76,13 +83,20 @@ class PreviewWidget(QWidget):
 
     # Taille ------------------------------------------------------------- #
     def hasHeightForWidth(self) -> bool:
-        return not self.collapsed
+        return not self.collapsed and not self._box_w
 
     def heightForWidth(self, w: int) -> int:
         return self.COLLAPSED_H if self.collapsed else int(w * 9 / 16)
 
     def sizeHint(self) -> QSize:
+        if self._box_w:
+            return QSize(self._box_w, self.COLLAPSED_H if self.collapsed else round(self._box_w * 9 / 16))
         return QSize(400, self.COLLAPSED_H if self.collapsed else 225)
+
+    def set_box(self, width: int) -> None:
+        """Taille exacte choisie par la fenêtre (disposition des cartes) : width × 16:9, ou le bandeau masqué."""
+        self._box_w = max(1, int(width))
+        self.setFixedSize(self._box_w, self.COLLAPSED_H if self.collapsed else round(self._box_w * 9 / 16))
 
     def set_collapsed(self, collapsed: bool) -> None:
         if collapsed == self.collapsed:
@@ -90,13 +104,17 @@ class PreviewWidget(QWidget):
         self.collapsed = collapsed
         if collapsed:
             self.image = None
+            self.setToolTip("Aperçu masqué (aucune ressource utilisée) — clic pour l'afficher")
+        else:
+            self.setToolTip("Double-clic : ouvrir la fenêtre OBS de cette instance")
+        if self._box_w:
+            self.set_box(self._box_w)
+        elif collapsed:
             self.setMinimumHeight(self.COLLAPSED_H)
             self.setMaximumHeight(self.COLLAPSED_H)
-            self.setToolTip("Aperçu masqué (aucune ressource utilisée) — clic pour l'afficher")
         else:
             self.setMaximumHeight(16777215)
             self.setMinimumHeight(120)
-            self.setToolTip("Double-clic : ouvrir la fenêtre OBS de cette instance")
         self.updateGeometry()
         self.update()
 

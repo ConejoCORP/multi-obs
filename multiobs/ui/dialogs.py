@@ -12,7 +12,7 @@ from .. import applog, naming, obsfiles, paths, streamdeck, theme, vcam
 from ..controller import duration_text
 from ..instance_config import InstanceDef
 from .tasks import run_task
-from .widgets import SwatchButtonPainter
+from .widgets import SwatchButtonPainter, limit_name
 
 PREVIEW_FPS_CHOICES = [(0, "Désactivé"), (1, "1 image/s"), (5, "5 images/s"), (10, "10 images/s"),
                        (15, "15 images/s"), (30, "30 images/s"), (60, "60 images/s")]
@@ -44,10 +44,13 @@ class VideoNameDialog(QDialog):
         self.preview = QLabel()
         self.preview.setProperty("muted", True)
         lay.addWidget(self.preview)
+        self.limit = QLabel(objectName="namingPreview")   # place restante avant la limite de Windows
+        self.limit.setWordWrap(True)
+        lay.addWidget(self.limit)
         buttons = QDialogButtonBox()
-        go = buttons.addButton("Lancer le rec", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.go = buttons.addButton("Lancer le rec", QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.addButton("Annuler", QDialogButtonBox.ButtonRole.RejectRole)
-        go.setDefault(True)
+        self.go.setDefault(True)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
@@ -58,6 +61,19 @@ class VideoNameDialog(QDialog):
         s = self.manager.settings
         self.preview.setText("output : " + naming.preview(s.get("filename_template"), self.manager.creator(),
                                                           "cam", self.name()))
+        # Taille finale des fichiers calculée avant de valider : pas de rec avec un nom trop long.
+        room, worst = self.manager.name_room(video=self.name())
+        limit_name(self.edit, room)
+        note, state = naming.limit_note(room, worst.name if worst and len(self.manager.instances) > 1 else "")
+        self.limit.setText(note)
+        self.limit.setVisible(bool(note))
+        for w in (self.limit, self.edit):
+            if w.property("limit") != state:
+                w.setProperty("limit", state)
+                w.style().unpolish(w)
+                w.style().polish(w)
+        self.go.setEnabled(room >= 0)
+        self.go.setToolTip("Raccourcis le nom : le fichier dépasserait la limite de Windows" if room < 0 else "")
 
     def name(self) -> str:
         return self.edit.text().strip()

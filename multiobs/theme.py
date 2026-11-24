@@ -208,6 +208,9 @@ QFrame#namingBar {{ background: {y['grey7']}; border-bottom: 1px solid {y['grey8
 QCheckBox#namingCheck {{ color: {y['white5']}; spacing: 5px; }}
 QCheckBox#namingCheck:hover {{ color: {y['white1']}; }}
 QLabel#namingPreview {{ color: {y['grey1']}; font-size: 8.5pt; }}
+QLabel#namingPreview[limit="near"] {{ color: {y['yellow2']}; }}
+QLabel#namingPreview[limit="over"] {{ color: {y['red1']}; font-weight: 600; }}
+QLineEdit[limit="over"], QLineEdit[limit="over"]:focus {{ border-color: {y['red2']}; }}
 QFrame#emptyState {{ background: {y['grey6']}; border: 1px dashed {y['grey3']}; border-radius: 10px; }}
 QLabel#allMinimized {{ color: {y['white5']}; padding: 40px; }}
 QFrame#miniBar {{ background: {y['grey7']}; border-top: 1px solid {y['grey8']}; }}

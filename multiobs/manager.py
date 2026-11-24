@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import applog, naming, obsfiles, paths, theme, vcam, winapi
 from .controller import InstanceController
-from .instance_config import InstanceDef, copy_tree_tolerant, ensure_config, vcam_resolution
+from .instance_config import InstanceDef, copy_tree_tolerant, ensure_config, record_directory, vcam_resolution
 
 BASE_PORT = 4461
 AUTOSAVE_SLUG = "_derniere_session"
@@ -96,6 +96,7 @@ class Manager(QObject):
         paths.DATA.mkdir(parents=True, exist_ok=True)
         self.settings = dict(DEFAULT_SETTINGS)
         self.instances: list[InstanceDef] = []
+        self._folder_cache: dict[str, tuple[float, str]] = {}   # dossiers des recs lus dans les profils
         self._load()
         self.controllers: dict[str, InstanceController] = {}
         for inst in self.instances:
@@ -132,6 +133,7 @@ class Manager(QObject):
                                int(self.settings.get("preview_divisor", 4)),
                                int(self.settings.get("preview_background_fps", -1)), self)
         c.settings = self.settings
+        c.start_name = lambda folder, c=c: self.start_name(c.inst, folder)
         c.defaultAudioAdded.connect(self._on_default_audio_added)
         c.obsReady.connect(lambda inst_id: self.apply_naming(inst_id))
         self.controllers[inst.id] = c
@@ -150,18 +152,67 @@ class Manager(QObject):
         """Nom mis dans les fichiers : vide si la case « Nom » est décochée (le nom reste gardé)."""
         return self.settings.get("creator", "") if self.settings.get("creator_in_name", True) else ""
 
-    def filename_format(self, inst: InstanceDef) -> str:
+    def record_folder(self, inst: InstanceDef) -> str:
+        """Dossier des enregistrements de l'instance : celui d'OBS s'il est ouvert, sinon celui du profil."""
+        c = self.controllers.get(inst.id)
+        if c is not None and c.connected and c.record_dir:
+            return c.record_dir
+        # Lu dans les .ini du profil : gardé 2 s (la barre du nom recalcule à chaque touche et redimensionnement).
+        cache = self._folder_cache
+        hit = cache.get(inst.id)
+        if hit and time.monotonic() - hit[0] < 2:
+            return hit[1]
+        folder = str(record_directory(inst))
+        cache[inst.id] = (time.monotonic(), folder)
+        return folder
+
+    def _full_format(self, inst: InstanceDef, creator: str | None = None, video: str | None = None) -> str:
         # Deux instances du même type enregistreraient sous le même nom : on les distingue.
         same_type = sum(1 for i in self.instances if i.rec_type == inst.rec_type)
-        suffix = inst.name if same_type > 1 else ""
-        return naming.obs_format(self.settings.get("filename_template"), self.creator(),
-                                 inst.rec_type, self.settings.get("video_name", ""), suffix)
+        return naming.obs_format(self.settings.get("filename_template"),
+                                 self.creator() if creator is None else creator, inst.rec_type,
+                                 self.settings.get("video_name", "") if video is None else video,
+                                 inst.name if same_type > 1 else "")
+
+    def filename_format(self, inst: InstanceDef, folder: str | None = None) -> str:
+        """Format du nom des fichiers envoyé à OBS. Toujours assez court pour Windows : si le chemin complet
+        dépassait la limite, le nom de la vidéo est raccourci (la barre du nom prévient avant d'en arriver là)."""
+        fmt = self._full_format(inst)
+        folder = self.record_folder(inst) if folder is None else folder
+        excess = naming.path_length(folder, fmt) - naming.PATH_LIMIT
+        if excess > 0:
+            video = naming.clean(self.settings.get("video_name", ""))
+            short = naming.cut(video, max(0, naming.win_len(video) - excess))
+            fmt = self._full_format(inst, video=short)
+        return fmt
 
     def filename_preview(self, inst: InstanceDef) -> str:
-        same_type = sum(1 for i in self.instances if i.rec_type == inst.rec_type)
-        return naming.preview(self.settings.get("filename_template"), self.creator(),
-                              inst.rec_type, self.settings.get("video_name", ""),
-                              inst.name if same_type > 1 else "")
+        return naming.expand(self.filename_format(inst))
+
+    def name_room(self, creator: str | None = None, video: str | None = None) -> tuple[int, InstanceDef | None]:
+        """Caractères encore possibles dans le nom avant la limite de Windows, pour l'instance au chemin le
+        plus long (négatif : de trop), avec cette instance. Nom et vidéo : ceux donnés, sinon les réglages."""
+        if creator is not None and not self.settings.get("creator_in_name", True):
+            creator = ""
+        room, worst = naming.PATH_LIMIT, None
+        for inst in self.instances:
+            left = naming.PATH_LIMIT - naming.path_length(self.record_folder(inst),
+                                                          self._full_format(inst, creator, video))
+            if worst is None or left < room:
+                room, worst = left, inst
+        return room, worst
+
+    def start_name(self, inst: InstanceDef, folder: str) -> tuple[str, str]:
+        """Juste avant un rec, avec le vrai dossier d'OBS : (format du nom, problème ou "")."""
+        fmt = self.filename_format(inst, folder)
+        length = naming.path_length(folder, fmt)
+        if length > naming.PATH_LIMIT:   # même sans nom de vidéo : dossier trop profond
+            return fmt, (f"chemin du fichier trop long pour Windows ({length} caractères, {naming.PATH_LIMIT} "
+                         f"au plus). Choisis un dossier plus court dans OBS > Paramètres > Sortie.")
+        if fmt != self._full_format(inst):
+            applog.log(f"{inst.name} : nom de la vidéo raccourci pour le rec (chemin limité à "
+                       f"{naming.PATH_LIMIT} caractères) : {naming.expand(fmt)}")
+        return fmt, ""
 
     def set_naming(self, creator: str | None = None, video: str | None = None,
                    template: str | None = None, creator_in_name: bool | None = None) -> None:

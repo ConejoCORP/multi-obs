@@ -1,9 +1,9 @@
 """Fenêtre principale de Multi OBS."""
 import time
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout,
                                QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
@@ -15,14 +15,15 @@ from ..manager import AUTOSAVE_SLUG, Manager
 from ..preview import STATE_ACTIVE, STATE_AWAY, STATE_BACKGROUND
 from ..remote import RemoteServer
 from ..syswatch import SystemEvents
+from . import cardlayout
 from .card import InstanceCard, MiniChip
 from .chatwindow import CHAT_MODES, ChatSettingsDialog, ChatWindow, LiveFinder
 from .deck_status import DeckStatus
 from .dialogs import InstanceDialog, SettingsDialog, VideoNameDialog, ask_conversions
 from .tasks import Task, run_task
-from .widgets import FlowLayout, icon
+from .widgets import FlowLayout, icon, limit_name
 
-CARD_MIN_W = 440
+CARDS_MARGIN = 14   # autour des cartes
 COMPACT_BELOW = 1060
 VCAM_CHECK_MS = 60_000   # vérification des caméras virtuelles dans Windows
 
@@ -39,7 +40,6 @@ class MainWindow(QMainWindow):
         self.manager = manager
         self.cards: dict[str, InstanceCard] = {}
         self.mini_chips: dict[str, MiniChip] = {}
-        self._columns = 0
         self._compact = False
         self._chat_windows: dict[str, ChatWindow] = {}   # fenêtre du chat de chaque instance du live
         self._live_finder: LiveFinder | None = None      # recherche du live YouTube en cours
@@ -59,11 +59,17 @@ class MainWindow(QMainWindow):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # Cartes à la largeur calculée (cardlayout) : jamais de défilement horizontal.
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.container = QWidget(objectName="cardsContainer")
-        self.grid = QGridLayout(self.container)
-        self.grid.setContentsMargins(14, 14, 14, 14)
-        self.grid.setSpacing(12)
+        # Une ligne de cartes centrée par rangée (la dernière, incomplète, centrée aussi).
+        self.rows_layout = QVBoxLayout(self.container)
+        self.rows_layout.setContentsMargins(CARDS_MARGIN, CARDS_MARGIN, CARDS_MARGIN, CARDS_MARGIN)
+        self.rows_layout.setSpacing(cardlayout.GAP)
+        self._plan = None
+        self._relayout_timer = QTimer(self, singleShot=True, interval=0, timeout=self._relayout)
         self.scroll.setWidget(self.container)
+        self.scroll.installEventFilter(self)   # zone des cartes redimensionnée (bandeau d'alerte, barre du bas…)
         root.addWidget(self.scroll, 1)
         self.empty = self._build_empty_state()
         self.all_minimized = QLabel("Toutes les instances sont réduites : « Remettre » dans la barre du bas.",
@@ -274,12 +280,19 @@ class MainWindow(QMainWindow):
     def _refresh_naming_preview(self) -> None:
         from .. import naming
         s = self.manager.settings
-        example = naming.preview(s.get("filename_template"),
-                                 self.creator_edit.text() if self.creator_on.isChecked() else "",
-                                 "cam", self.video_edit.text())
+        creator = self.creator_edit.text() if self.creator_on.isChecked() else ""
+        example = naming.preview(s.get("filename_template"), creator, "cam", self.video_edit.text())
+        # Taille finale des chemins (dossier + nom) : on ne peut pas taper au-delà de la limite de Windows.
+        room, worst = self.manager.name_room(creator, self.video_edit.text())
+        limit_name(self.video_edit, room)
+        limit_name(self.creator_edit, room)
+        note, state = naming.limit_note(room, worst.name if worst and len(self.manager.instances) > 1 else "")
+        self._set_prop(self.naming_preview, "limit", state)
+        self._set_prop(self.video_edit, "limit", state)
         fm = self.naming_preview.fontMetrics()
-        self.naming_preview.setToolTip(f"Nom du prochain fichier : {example}")
-        self.naming_preview.setText(fm.elidedText(f"output : {example}", Qt.TextElideMode.ElideRight,
+        self.naming_preview.setToolTip(f"Nom du prochain fichier : {example}" + (f"\n{note}" if note else ""))
+        text = f"output : {example}" if not note else note if state == "over" else f"{note}  ·  output : {example}"
+        self.naming_preview.setText(fm.elidedText(text, Qt.TextElideMode.ElideRight,
                                                   max(60, self.naming_preview.width())))
 
     def _build_empty_state(self) -> QFrame:
@@ -322,6 +335,8 @@ class MainWindow(QMainWindow):
                 card = InstanceCard(self.manager.controller(inst.id), vcam_name=names.get(inst.vcam, ""))
                 card.ctrl.actionFailed.connect(lambda m: self.statusBar().showMessage("⚠ " + m, 10000))
                 card.ctrl.alertRaised.connect(self._on_alert)
+                card.ctrl.obsReady.connect(lambda _i: self._refresh_naming_preview())   # vrai dossier d'OBS connu
+                card.layoutNeeded.connect(self._schedule_relayout)
                 card.launchRequested.connect(lambda i: self.launch([i]))
                 card.editRequested.connect(self.edit_instance)
                 card.deleteRequested.connect(self.delete_instance)
@@ -341,43 +356,63 @@ class MainWindow(QMainWindow):
                 self.cards[inst.id].apply_definition()
             if inst.id in self._chat_windows:   # nom de l'instance changé : titre de sa fenêtre du chat
                 self._chat_windows[inst.id].set_name(inst.name)
-        self._columns = 0
+        self._plan = None
         self._relayout()
         self._refresh_mini_bar()
         self.refresh_status()
+        self._refresh_naming_preview()   # dossiers et noms des instances : place restante pour le nom
         self._schedule_context()
 
+    def _schedule_relayout(self) -> None:
+        self._relayout_timer.start()
+
+    def _cards_area(self) -> tuple[int, int]:
+        """Place pour les cartes : largeur sans la barre de défilement (qu'elle soit là ou non, pour ne pas
+        changer de disposition quand elle apparaît), hauteur visible."""
+        bar = self.scroll.style().pixelMetric(self.scroll.style().PixelMetric.PM_ScrollBarExtent)
+        return (self.scroll.width() - 2 * CARDS_MARGIN - bar,
+                self.scroll.height() - 2 * CARDS_MARGIN)
+
     def _relayout(self) -> None:
+        """Cartes disposées selon leur nombre et la place (cardlayout) : colonnes, aperçu dessous ou à côté."""
         shown = [i for i in self.manager.instances if i.id in self.cards and not i.card_minimized]
-        avail = self.scroll.viewport().width() - 28
-        cols = max(1, min(len(shown) or 1, (avail + 12) // (CARD_MIN_W + 12)))
-        if cols == self._columns and self.grid.count() == max(1, len(shown)):
+        plan = None
+        if shown:
+            first = self.cards[shown[0].id]
+            rows = max(self.cards[i.id].meter_rows() for i in shown)
+            plan = cardlayout.plan(len(shown), *self._cards_area(), first.chrome(rows))
+        key = (plan, tuple(i.id for i in shown), bool(self.cards))
+        if key == self._plan:
             return
-        self._columns = cols
-        while self.grid.count():
-            w = self.grid.takeAt(0).widget()
-            if w is self.empty or w is self.all_minimized:
-                w.setParent(None)
-        for c in range(self.grid.columnCount()):
-            self.grid.setColumnStretch(c, 0)
-        for r in range(self.grid.rowCount()):
-            self.grid.setRowStretch(r, 0)
+        self._plan = key
+        lay = self.rows_layout
+        while lay.count():   # anciennes rangées (les cartes restent dans le conteneur)
+            item = lay.takeAt(0)
+            if item.layout() is not None:
+                while item.layout().count():
+                    item.layout().takeAt(0)
+                item.layout().deleteLater()
+            elif item.widget() in (self.empty, self.all_minimized):
+                item.widget().setParent(None)
         for inst in self.manager.instances:   # réduites : rangées dans la barre du bas, aperçu arrêté
             if inst.card_minimized and inst.id in self.cards:
                 self.cards[inst.id].hide()
         if not shown:
-            self.grid.addWidget(self.all_minimized if self.cards else self.empty, 0, 0, Qt.AlignmentFlag.AlignTop)
-            self.grid.setColumnStretch(0, 1)
-            self.grid.setRowStretch(1, 1)
+            lay.addWidget(self.all_minimized if self.cards else self.empty, 0, Qt.AlignmentFlag.AlignTop)
+            lay.addStretch(1)
             return
-        for k, inst in enumerate(shown):
-            card = self.cards[inst.id]
-            self.grid.addWidget(card, k // cols, k % cols, Qt.AlignmentFlag.AlignTop)
-            card.show()
-        for c in range(cols):
-            self.grid.setColumnStretch(c, 1)
-        rows = (len(shown) + cols - 1) // cols
-        self.grid.setRowStretch(rows, 1)
+        for start in range(0, len(shown), plan.cols):
+            row = QHBoxLayout()
+            row.setSpacing(cardlayout.GAP)
+            row.addStretch(1)
+            for inst in shown[start:start + plan.cols]:
+                card = self.cards[inst.id]
+                card.apply_layout(plan.mode, plan.pw, plan.card_w)
+                row.addWidget(card, 0, Qt.AlignmentFlag.AlignTop)
+                card.show()
+            row.addStretch(1)
+            lay.addLayout(row)
+        lay.addStretch(1)
 
     def _refresh_mini_bar(self) -> None:
         """Une pastille par instance réduite, dans l'ordre des instances."""
@@ -397,7 +432,6 @@ class MainWindow(QMainWindow):
 
     def _set_card_minimized(self, inst_id: str, minimized: bool) -> None:
         self.manager.set_card_minimized(inst_id, minimized)
-        self._columns = 0
         self._relayout()
         self._refresh_mini_bar()
         self.refresh_global()
@@ -412,6 +446,11 @@ class MainWindow(QMainWindow):
             idx = next(n for n, i in enumerate(insts) if i.id == inst_id)
             target = next(n for n, i in enumerate(insts) if i.id == shown[k])
             self.manager.move_instance(inst_id, target - idx)
+
+    def eventFilter(self, obj, e):
+        if obj is self.scroll and e.type() == QEvent.Type.Resize:
+            self._schedule_relayout()
+        return super().eventFilter(obj, e)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -786,6 +825,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Rec annulé", 4000)
                 return
             if dlg.name() != self.video_edit.text():
+                self.video_edit.setMaxLength(32767)   # setText couperait au maximum calculé pour l'ancien nom
                 self.video_edit.setText(dlg.name())
             self._apply_naming()   # le nouveau nom part vers OBS avant le rec (même connexion, dans l'ordre)
             start()

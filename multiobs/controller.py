@@ -36,6 +36,9 @@ STOP_SETTLE_S = 4
 # Images manquantes : verdict seulement sur des images rendues au moins 1 s après le départ / la reprise.
 SKIP_SETTLE_NS = 1_000_000_000
 SYNC_STATUS = {"vendorName": "multiobs-sync", "requestType": "status"}
+# Titre et icône des fenêtres d'OBS : posés dans un fil à part, un à la fois pour toutes les instances (l'icône
+# d'une couleur est créée une seule fois) ; la fermeture de Multi OBS attend la décoration en cours.
+_DECOR_LOCK = threading.Lock()
 
 
 def _db(mul: float) -> float:
@@ -84,9 +87,15 @@ class InstanceController(QObject):
         self._close_after_stop = False
         self.close_after_remux = False   # s'éteindra quand OBS aura fini de convertir le rec en MP4
         self.settings: dict = {}
+        self.start_name = None   # start_name(dossier) -> (format du nom, problème) : fourni par le Manager
         self._remux_watch: list[dict] = []
         self._remux_checking = False
         self._disk_pending = False
+        self._log_pending = False       # lecture du journal d'OBS en cours (hors de l'interface)
+        self._dialogs_pending = False   # recherche des dialogues d'OBS en cours (idem)
+        self._decor_pending = False     # barre des tâches en cours de décoration (idem)
+        self._decor_closed = False      # Multi OBS se ferme : plus de décoration
+        self._decor_forget = False      # OBS s'est fermé : sa fenêtre est à oublier
         self._remux_timer = QTimer(self, interval=3000, timeout=self._check_remux)
         # Conversion MKV → MP4 en cours (barre sur la carte) : {"mp4", "total", "progress"…}
         self.remux: dict | None = None
@@ -231,11 +240,7 @@ class InstanceController(QObject):
         now = time.monotonic()
         rec = self.connected and self.recording
         if self.proc:
-            for message in self.logwatch.poll():   # ce qu'OBS écrit dans son journal
-                if rec or self.streaming:
-                    self._raise("log:" + message, message, 120)
-                else:
-                    applog.log(f"{self.inst.name} (journal d'OBS) : {message}")
+            self._poll_log()
         # Le fichier ne grossit plus alors que le rec n'est pas en pause : OBS n'écrit plus rien. (Pendant
         # un arrêt, c'est normal : « l'arrêt ne se termine pas » prend le relais.)
         if rec and not self.paused and not self._stop_asked:
@@ -262,10 +267,7 @@ class InstanceController(QObject):
         elif not rec:
             self._stop_asked = 0.0
             self._clear("stopstuck")
-        if self.obs_dialogs and (rec or self.streaming or now - self._stopped_at < 30):
-            self._raise("dialog", f"OBS affiche une erreur : « {self.obs_dialogs[0]} » — clique « Voir OBS »")
-        else:
-            self._clear("dialog")
+        self._check_dialog_alert(now)
         low_disk = float(self.settings.get("low_disk_gb", 10)) * 1024 ** 3
         if self.disk_total and self.disk_free < low_disk and (rec or self.streaming):
             self._raise("disk", f"Disque presque plein ({self.disk_free / 1024 ** 3:.1f} Go libres)")
@@ -274,6 +276,55 @@ class InstanceController(QObject):
         if rec and self._disk_tick % 2 == 0:
             self.ws.call("CallVendorRequest", SYNC_STATUS, self._on_sync_status)
         self._check_black(now, self.connected and ((self.recording and not self.paused) or self.streaming))
+
+    def _poll_log(self) -> None:
+        """Ce qu'OBS écrit dans son journal. Lu hors de l'interface : liste des journaux, taille et lecture du
+        dernier à chaque seconde (jusqu'à 20 ms quand le disque travaille)."""
+        if self._log_pending:
+            return
+        self._log_pending = True
+
+        def then(messages):
+            self._log_pending = False
+            rec = self.connected and self.recording
+            for message in messages or []:
+                if rec or self.streaming:
+                    self._raise("log:" + message, message, 120)
+                else:
+                    applog.log(f"{self.inst.name} (journal d'OBS) : {message}")
+            if messages:
+                self.changed.emit()
+        self._disk(self.logwatch.poll, then)
+
+    def _check_dialogs(self) -> None:
+        """Fenêtres de dialogue d'OBS restées cachées. Cherchées hors de l'interface : il faut passer en revue
+        toutes les fenêtres du système (jusqu'à 35 ms)."""
+        if self._dialogs_pending:
+            return
+        self._dialogs_pending = True
+        proc = self.proc
+
+        def work():
+            try:
+                return winapi.pending_dialogs(proc.pid, obsfiles.remux_titles())
+            except Exception:
+                return []
+
+        def then(dialogs):
+            self._dialogs_pending = False
+            if self.proc is not proc or dialogs is None or dialogs == self.obs_dialogs:
+                return   # OBS fermé entre-temps, ou rien de nouveau
+            self.obs_dialogs = dialogs
+            self._check_dialog_alert(time.monotonic())
+            self.changed.emit()
+        self._disk(work, then)
+
+    def _check_dialog_alert(self, now: float) -> None:
+        rec = self.connected and self.recording
+        if self.obs_dialogs and (rec or self.streaming or now - self._stopped_at < 30):
+            self._raise("dialog", f"OBS affiche une erreur : « {self.obs_dialogs[0]} » — clique « Voir OBS »")
+        else:
+            self._clear("dialog")
 
     def _check_black(self, now: float, active: bool) -> None:
         """Écran noir (SafeGuard) : pendant un rec ou un live, une petite capture de la scène à l'antenne toutes
@@ -363,6 +414,10 @@ class InstanceController(QObject):
     # ------------------------------------------------------------------ #
     def _adopt_running(self) -> None:
         exe = str(self.inst.exe)
+        # psutil garde les processus vus au dernier passage : un numéro réutilisé par un autre programme
+        # (OBS relancé entre-temps) rendrait l'ancien nom et l'OBS ne serait pas repris.
+        if hasattr(psutil.process_iter, "cache_clear"):
+            psutil.process_iter.cache_clear()
         for p in psutil.process_iter(["name", "exe"]):
             try:
                 if p.info["name"] and p.info["name"].lower() == "obs64.exe" and p.info["exe"] \
@@ -483,8 +538,7 @@ class InstanceController(QObject):
         self.proc = None
         self._close_after_stop = False
         self.close_after_remux = False
-        self._hwnd = None
-        self.taskbar.hwnd = None
+        self._decor_forget = True   # fenêtre disparue : oubliée avant la prochaine décoration (fil à part)
         self.record_dir = ""
         self._rate_samples.clear()
         self._launch_timer.stop()
@@ -536,29 +590,54 @@ class InstanceController(QObject):
     def shutdown(self) -> None:
         """Arrête le thread d'aperçu et remet l'icône d'origine de la fenêtre OBS."""
         try:
-            self.taskbar.restore()
+            with _DECOR_LOCK:   # attend la décoration en cours, puis plus aucune
+                self._decor_closed = True
+                self._forget_window()
+                self.taskbar.restore()
         except Exception:
             pass
         self.preview_channel.shutdown()
 
-    def _decorate_window(self) -> None:
-        """Titre « OBS Blue — Caméra » et logo OBS coloré dans la barre des tâches."""
-        if not self.proc:
-            return
-        if not self.settings.get("taskbar_rename", True):
-            if self.taskbar.hwnd:
-                self.taskbar.restore()
-            return
-        try:
-            if not (self._hwnd and taskbar.user32.IsWindow(self._hwnd)):
-                self._hwnd = winapi.main_window(self.proc.pid)
-            if self._hwnd:
-                self.taskbar.apply(self._hwnd, self.inst.name, self.inst.color)
-        except Exception:
+    def _forget_window(self) -> None:
+        """(Sous _DECOR_LOCK.) OBS s'est fermé depuis la dernière décoration : sa fenêtre n'existe plus."""
+        if self._decor_forget:
+            self._decor_forget = False
             self._hwnd = None
+            self.taskbar.hwnd = None
+
+    def _decorate_window(self) -> None:
+        """Titre « OBS Blue — Caméra » et logo OBS coloré dans la barre des tâches. Dans un fil à part : chaque
+        message à la fenêtre d'OBS attend qu'OBS le traite, jusqu'à 0,3 s quand il démarre (Multi OBS se
+        figeait près d'une seconde à chaque OBS allumé)."""
+        if not self.proc or self._decor_pending:
+            return
+        self._decor_pending = True
+        pid, name, color = self.proc.pid, self.inst.name, self.inst.color
+        rename = self.settings.get("taskbar_rename", True)
+
+        def work():
+            with _DECOR_LOCK:
+                if self._decor_closed:
+                    return
+                self._forget_window()
+                if not rename:
+                    if self.taskbar.hwnd:
+                        self.taskbar.restore()
+                    return
+                try:
+                    if not (self._hwnd and taskbar.user32.IsWindow(self._hwnd)):
+                        self._hwnd = winapi.main_window(pid)
+                    if self._hwnd:
+                        self.taskbar.apply(self._hwnd, name, color)
+                except Exception:
+                    self._hwnd = None
+
+        def then(_):
+            self._decor_pending = False
+        self._disk(work, then)
 
     # ------------------------------------------------------------------ #
-    # Disque : jamais dans le fil de l'interface
+    # Disque (et fenêtres d'OBS) : jamais dans le fil de l'interface
     # ------------------------------------------------------------------ #
     def _disk(self, work, then) -> None:
         """work() dans un fil à part, puis then(résultat) dans l'interface (None si work a échoué).
@@ -612,7 +691,9 @@ class InstanceController(QObject):
             self._check_pause_support()   # l'utilisateur a pu changer ses réglages dans OBS
         if self.proc:
             try:
-                alive = self.proc.is_running() and self.proc.status() != psutil.STATUS_ZOMBIE
+                # Pas de proc.status() : sous Windows, psutil ne voit jamais de zombie, et status() parcourt
+                # tous les processus et fils du système (30 à 40 ms, interface figée, à chaque seconde).
+                alive = self.proc.is_running()
             except psutil.Error:
                 alive = False
             if not alive:
@@ -626,10 +707,7 @@ class InstanceController(QObject):
             self.ws.call("GetStreamStatus", cb=self._on_stream_status)
             self._decorate_window()
         if self.proc and self._disk_tick % 2 == 0:
-            try:
-                self.obs_dialogs = winapi.pending_dialogs(self.proc.pid, obsfiles.remux_titles())
-            except Exception:
-                self.obs_dialogs = []
+            self._check_dialogs()
         elif not self.proc:
             self.obs_dialogs = []
         self._check_health()
@@ -1090,8 +1168,24 @@ class InstanceController(QObject):
                 self.actionFailed.emit(f"{self.inst.name} : dossier d'enregistrement introuvable "
                                        f"({folder}). Change-le dans OBS > Paramètres > Sortie.")
                 return
-            if self.connected and not self.recording:
-                self.ws.call("StartRecord", cb=started)
+            if not (self.connected and not self.recording):
+                return
+            if folder and self.start_name is not None:
+                # Taille finale du chemin, avec le vrai dossier : nom renvoyé à OBS juste avant le départ
+                # (même connexion, dans l'ordre), raccourci s'il le faut ; refus si même ça ne suffit pas.
+                fmt, problem = self.start_name(folder)
+                if problem:
+                    self._start_asked = 0.0
+                    self._raise("path", f"REC PAS LANCÉ : {problem}", ttl=60)
+                    self.actionFailed.emit(f"{self.inst.name} : rec pas lancé, {problem}")
+                    self.changed.emit()
+                    return
+                self._clear("path")
+                self.record_dir = folder
+                self.ws.call("SetProfileParameter", {"parameterCategory": "Output",
+                                                     "parameterName": "FilenameFormatting",
+                                                     "parameterValue": fmt})
+            self.ws.call("StartRecord", cb=started)
         self.ws.call("GetRecordDirectory", cb=cb)
 
     def _settling(self) -> bool:
